@@ -10,13 +10,15 @@ COPY package*.json ./
 # Build arguments for API endpoint configuration
 ARG VITE_API_BASE_URL=http://localhost:4123/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
-ENV NODE_ENV=production
 
 # Install dependencies
 RUN npm install
 
 # Copy the rest of the application source code
 COPY . .
+
+# Ensure production optimizations are applied during the build
+ENV NODE_ENV=production
 
 # Build the application for production
 RUN npm run build
