@@ -129,14 +129,23 @@ class TestHealthEndpoints:
         # Test OpenAPI schema
         response = api_client.get("/openapi.json")
         assert response.status_code == 200
-        
+
         # Test Swagger UI
         response = api_client.get("/docs")
         assert response.status_code == 200
-        
+
         # Test ReDoc
         response = api_client.get("/redoc")
         assert response.status_code == 200
+
+    def test_languages_endpoint_alias(self, api_client):
+        """Ensure multilingual languages endpoint is accessible via /v1 alias"""
+        response = api_client.get("/v1/languages")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "languages" in data
+        assert isinstance(data["languages"], list)
 
 
 class TestTextToSpeechJSON:
