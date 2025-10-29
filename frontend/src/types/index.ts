@@ -123,6 +123,7 @@ export interface VoiceSample {
   uploadDate: Date;
   aliases?: string[];
   language?: string;
+  libraryPath?: string;
 }
 
 export interface AudioRecord {
@@ -175,6 +176,7 @@ export interface SupportedLanguageItem {
 export interface SupportedLanguagesResponse {
   languages: SupportedLanguageItem[];
   count: number;
+  model_type?: string;
 }
 
 export interface AudioInfo {

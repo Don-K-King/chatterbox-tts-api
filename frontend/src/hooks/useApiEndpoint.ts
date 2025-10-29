@@ -13,8 +13,27 @@ const isDockerFullstack = () => {
     (currentPort !== '4123' && currentPort !== '3000' && currentHost !== 'localhost' && currentHost !== '127.0.0.1');
 };
 
+const getEnvApiBase = (): string | undefined => {
+  const viteEnv = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
+  if (viteEnv && typeof viteEnv === 'string' && viteEnv.trim().length > 0) {
+    return viteEnv.trim().replace(/\/$/, '');
+  }
+
+  if (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL) {
+    return process.env.VITE_API_BASE_URL.trim().replace(/\/$/, '');
+  }
+
+  return undefined;
+};
+
+const envApiBase = getEnvApiBase();
+
 // Default API endpoints based on environment
 const getDefaultApiBase = () => {
+  if (envApiBase) {
+    return envApiBase;
+  }
+
   if (typeof window === 'undefined') return 'http://localhost:4123/v1';
 
   if (isDockerFullstack()) {

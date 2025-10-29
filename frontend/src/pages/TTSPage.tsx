@@ -124,7 +124,11 @@ export default function TTSPage() {
     removeAlias,
     isLoading: voicesLoading,
     isBackendReady: voicesBackendReady,
-    error: voicesError
+    error: voicesError,
+    languageOptions,
+    defaultLanguage: defaultVoiceLanguage,
+    isMultilingual: isMultilingualMode,
+    isLoadingLanguages: isLoadingVoiceLanguages
   } = useVoiceLibrary();
 
   // Audio history management
@@ -545,6 +549,10 @@ export default function TTSPage() {
               onClearDefaultVoice={clearDefaultVoice}
               onAddAlias={addAlias}
               onRemoveAlias={removeAlias}
+              languageOptions={languageOptions}
+              defaultLanguage={defaultVoiceLanguage}
+              isMultilingual={isMultilingualMode}
+              isLoadingLanguages={isLoadingVoiceLanguages}
             />
 
             {/* Voice Library Error Display */}

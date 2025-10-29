@@ -2,7 +2,8 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createTTSService } from '../services/tts';
 import { useApiEndpoint } from './useApiEndpoint';
-import type { VoiceSample, HealthResponse, VoiceLibraryResponse } from '../types';
+import type { VoiceSample, HealthResponse, VoiceLibraryResponse, SupportedLanguagesResponse } from '../types';
+import { LANGUAGE_OPTIONS, DEFAULT_LANGUAGE, getLanguageByCode } from '../constants/languages';
 
 // Convert backend voice data to frontend VoiceSample format
 const convertToVoiceSample = (backendVoice: any): VoiceSample => {
@@ -34,6 +35,15 @@ export function useVoiceLibrary() {
     staleTime: 1000,
   });
 
+  const languagesQuery = useQuery<SupportedLanguagesResponse>({
+    queryKey: ['supported-languages', apiBaseUrl],
+    queryFn: ttsService.getSupportedLanguages,
+    enabled: healthQuery.data?.status === 'healthy' || healthQuery.data?.status === 'initializing',
+    staleTime: 60000,
+    retry: 2,
+    refetchOnWindowFocus: false,
+  });
+
   // Load voices from backend with dependency on health
   const voicesQuery = useQuery<VoiceSample[]>({
     queryKey: ['voices', apiBaseUrl],
@@ -43,6 +53,7 @@ export function useVoiceLibrary() {
 
       for (const backendVoice of response.voices) {
         const voiceSample = convertToVoiceSample(backendVoice);
+        voiceSample.libraryPath = backendVoice.path;
 
         // Generate audio URL for preview (download endpoint)
         try {
@@ -80,6 +91,48 @@ export function useVoiceLibrary() {
   });
 
   const voices = voicesQuery.data || [];
+
+  const languageOptions = useMemo(() => {
+    if (languagesQuery.data?.languages?.length) {
+      return languagesQuery.data.languages
+        .map(language => {
+          const knownLanguage = getLanguageByCode(language.code);
+          const label = knownLanguage
+            ? `${knownLanguage.flag ? `${knownLanguage.flag} ` : ''}${knownLanguage.name} (${knownLanguage.nativeName})`
+            : `${language.code.toUpperCase()} – ${language.name}`;
+
+          return {
+            value: language.code,
+            label,
+            code: language.code,
+            name: knownLanguage?.name ?? language.name
+          };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label));
+    }
+
+    return LANGUAGE_OPTIONS.map(option => ({
+      ...option,
+      code: option.value,
+      name: option.label
+    }));
+  }, [languagesQuery.data]);
+
+  const defaultLanguage = useMemo(() => {
+    if (languagesQuery.data?.languages?.length) {
+      return languagesQuery.data.languages.find(lang => lang.code === DEFAULT_LANGUAGE)?.code
+        || languagesQuery.data.languages[0]?.code
+        || DEFAULT_LANGUAGE;
+    }
+    return LANGUAGE_OPTIONS[0]?.value || DEFAULT_LANGUAGE;
+  }, [languagesQuery.data]);
+
+  const isMultilingual = useMemo(() => {
+    if (languagesQuery.data?.model_type) {
+      return languagesQuery.data.model_type === 'multilingual';
+    }
+    return languageOptions.length > 1;
+  }, [languagesQuery.data, languageOptions.length]);
 
   // Cleanup URLs when voices change
   useEffect(() => {
@@ -222,7 +275,13 @@ export function useVoiceLibrary() {
     isLoading: voicesQuery.isLoading || healthQuery.isLoading,
     isBackendReady: healthQuery.data?.status === 'healthy' || healthQuery.data?.status === 'initializing',
     healthStatus: healthQuery.data?.status,
-    error: voicesQuery.error
+    error: voicesQuery.error,
+    languageOptions,
+    supportedLanguages: languagesQuery.data?.languages ?? [],
+    defaultLanguage,
+    isMultilingual,
+    isLoadingLanguages: languagesQuery.isLoading,
+    languagesError: languagesQuery.error
   };
 }
 

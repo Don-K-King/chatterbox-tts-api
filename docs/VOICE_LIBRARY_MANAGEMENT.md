@@ -11,7 +11,19 @@ The Chatterbox TTS API now includes a comprehensive voice library management sys
 - **Multiple Audio Formats**: Support for MP3, WAV, FLAC, M4A, and OGG files
 - **RESTful Voice Management**: Full CRUD operations for voice management
 - **Docker & Local Support**: Works seamlessly with both Docker and direct Python installations
-- **Frontend Integration**: Complete voice management UI in the web frontend
+- **Frontend Integration**: Komplettes Voice-Studio zur Verwaltung, Validierung und Vorschau im Browser
+
+## 🧭 Voice Studio Workflow
+
+Das React-Frontend bietet eine dedizierte **Voice Studio**-Seite, die alle Schritte der Multilingual-Anleitung abbildet:
+
+1. **Multilingual-Modus prüfen** – Anzeige, ob `USE_MULTILINGUAL_MODEL=true` gesetzt ist und wie viele Sprachmodelle aktiv sind.
+2. **Voice-Verzeichnis vorbereiten** – Hinweise zum Anlegen von `voices/` bzw. zum Setzen von `VOICE_LIBRARY_DIR` inklusive Beispielbefehlen.
+3. **Samples hochladen** – Drag-and-Drop Upload mit ISO-639-1-Auswahl; Sprachen werden gegen `GET /v1/languages` validiert.
+4. **Bibliothek prüfen** – Übersicht aller Stimmen mit Sprache, Upload-Datum, Aliases und Default-Markierung.
+5. **Versionieren** – Erinnerung, das komplette `voices/`-Verzeichnis (inkl. `voices.json`) in Ihr Repository zu übernehmen.
+
+> 💡 Starten Sie das Voice Studio mit `docker compose -f docker/docker-compose.frontend.yml up --build` oder lokal via `npm run dev`. Die Oberfläche nutzt den API-Endpunkt aus `VITE_API_BASE_URL`.
 
 ## 🚀 Getting Started
 
@@ -342,3 +354,25 @@ Planned features for future releases:
 - Advanced voice metadata
 - Voice quality analysis
 - Automatic voice optimization
+
+## 💾 Voices versionieren (PowerShell Workflow)
+
+Nutzen Sie folgende PowerShell-Befehle, um neue Stimmen und Metadaten aus der persistenten Library in Ihr Git-Repository zu übernehmen:
+
+```powershell
+Set-Location C:\pfad\zu\chatterbox-tts-api
+
+# Änderungen prüfen
+git status voices
+
+# Stimmen & voices.json hinzufügen
+git add voices\* voices.json
+
+# Commit erstellen
+git commit -m "Add new multilingual voice samples"
+
+# Änderungen pushen
+git push origin <branch-name>
+```
+
+> ✅ Stellen Sie sicher, dass `voices/` nicht von `.gitignore` ausgeschlossen wird und nur validierte Samples eingecheckt werden. So bleiben Stimmen beim Deployment sofort verfügbar.
