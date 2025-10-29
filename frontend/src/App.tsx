@@ -6,6 +6,7 @@ import ThemeToggle from './components/theme-toggle';
 import Navigation from './components/Navigation';
 import TTSPage from './pages/TTSPage';
 import MemoryPage from './pages/MemoryPage';
+import VoiceStudioPage from './pages/VoiceStudioPage';
 import { createTTSService } from './services/tts';
 import { useApiEndpoint } from './hooks/useApiEndpoint';
 import { getFrontendVersion } from './lib/version';
@@ -49,6 +50,7 @@ function App() {
       <main className="flex-1 max-w-6xl mx-auto w-full">
         <Switch>
           <Route path="/" component={TTSPage} />
+          <Route path="/voice-studio" component={VoiceStudioPage} />
           <Route path="/memory-management" component={MemoryPage} />
           <Route>
             {/* 404 Route */}

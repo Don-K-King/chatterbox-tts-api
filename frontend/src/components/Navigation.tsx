@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'wouter';
-import { Volume2, MemoryStick } from 'lucide-react';
+import { Volume2, MemoryStick, Wand2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Navigation() {
@@ -12,6 +12,12 @@ export default function Navigation() {
       label: 'TTS',
       icon: Volume2,
       description: 'Text-to-Speech Generation'
+    },
+    {
+      path: '/voice-studio',
+      label: 'Voice Studio',
+      icon: Wand2,
+      description: 'Geführter Workflow für mehrsprachige Voices'
     },
     {
       path: '/memory-management',

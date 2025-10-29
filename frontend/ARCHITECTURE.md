@@ -16,6 +16,9 @@ frontend/src/
 │   │   ├── AdvancedSettings.tsx    # Advanced TTS parameters
 │   │   ├── AudioPlayer.tsx         # Audio playback and download
 │   │   └── index.ts               # Component exports
+│   ├── voices/                # Voice Studio components
+│   │   ├── VoiceDetailsPanel.tsx   # Selected voice preview & metadata
+│   │   └── VoiceWorkflowGuide.tsx  # Guided creation workflow
 │   ├── theme-provider.tsx      # Theme context provider
 │   ├── theme-toggle.tsx        # Theme toggle button
 │   ├── VoiceLibrary.tsx       # Voice library management with default voice controls
@@ -26,7 +29,7 @@ frontend/src/
 │   └── tts.ts                 # TTS API service
 ├── types/
 │   └── index.ts               # TypeScript type definitions
-├── App.tsx                    # Main application component
+├── App.tsx                    # Main application component & routing
 ├── main.tsx                   # Application entry point
 └── styles.css                 # Global styles
 ```
@@ -37,7 +40,7 @@ frontend/src/
 
 - Users can change the API endpoint directly in the browser
 - Endpoint settings persist in localStorage
-- Default endpoint: `http://192.168.0.4:4123/v1`
+- Default endpoint: `http://localhost:4123/v1` (override via `VITE_API_BASE_URL`)
 - Click the endpoint URL to edit it inline
 
 ### 🎙️ Voice Management with Default Voice Support
@@ -54,6 +57,13 @@ frontend/src/
 3. **Visual Feedback**: Crown icon appears next to the default voice name
 4. **Settings Sync**: The settings popover automatically reflects changes made in the Voice Library
 
+### 🧭 Voice Studio Workflow
+
+- **Guided Setup**: Step-by-step checklist for multilingual mode, persistent storage, uploading and versioning voices
+- **Language Validation**: Voice uploads use `GET /v1/languages` to ensure ISO-639-1 codes are valid
+- **Metadata Dashboard**: Detailed panel with language badges, audio preview and default voice actions
+- **Docker Support**: `docker/docker-compose.frontend.yml` builds the Voice Studio independent of the API container
+
 ### 🎨 Component Architecture
 
 - **ApiEndpointSelector**: Inline editing of API base URL
@@ -62,10 +72,12 @@ frontend/src/
 - **AdvancedSettings**: Collapsible advanced parameters
 - **AudioPlayer**: Audio playback with download functionality
 - **VoiceLibrary**: Voice management with integrated default voice controls
+- **VoiceWorkflowGuide / VoiceDetailsPanel**: Dedicated Voice Studio experience (guided workflow + metadata)
 
 ### 🪝 Custom Hooks
 
-- **useApiEndpoint**: Manages API endpoint URL with localStorage persistence
+- **useApiEndpoint**: Manages API endpoint URL with localStorage persistence and `VITE_API_BASE_URL`
+- **useVoiceLibrary**: Provides multilingual-aware voice management with live language discovery
 - **useDefaultVoice**: Manages default voice selection with backend synchronization
 
 ### 🔧 Services
@@ -86,6 +98,13 @@ frontend/src/
 3. Edit the URL (e.g., `http://localhost:4123/v1`)
 4. Press Enter to save or Escape to cancel
 5. The new endpoint is automatically saved and used for all API calls
+
+### Navigating the Voice Studio
+
+1. Open the navigation tab **Voice Studio**
+2. Prüfen Sie den Status des Multilingual-Modus und folgen Sie den angezeigten To-dos
+3. Laden Sie neue Samples hoch, wählen Sie Sprachen und überprüfen Sie Metadaten im rechten Panel
+4. Verwenden Sie die PowerShell-Anweisungen im Workflow, um `voices/` in Ihr Repository aufzunehmen
 
 ### Managing Default Voice
 

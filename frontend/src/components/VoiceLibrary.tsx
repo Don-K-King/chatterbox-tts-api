@@ -7,6 +7,13 @@ import VoiceUploadModal from './VoiceUploadModal';
 import type { VoiceSample } from '../types';
 import { getLanguageByCode, getLanguageName, DEFAULT_LANGUAGE, getLanguageFlag } from '../constants/languages';
 
+interface VoiceLibraryLanguageOption {
+  value: string;
+  label: string;
+  code?: string;
+  name?: string;
+}
+
 interface VoiceLibraryProps {
   voices: VoiceSample[];
   selectedVoice: VoiceSample | null;
@@ -21,6 +28,10 @@ interface VoiceLibraryProps {
   onClearDefaultVoice?: () => Promise<boolean>;
   onAddAlias?: (voiceName: string, alias: string) => Promise<boolean>;
   onRemoveAlias?: (voiceName: string, alias: string) => Promise<boolean>;
+  languageOptions?: VoiceLibraryLanguageOption[];
+  defaultLanguage?: string;
+  isMultilingual?: boolean;
+  isLoadingLanguages?: boolean;
 }
 
 export default function VoiceLibrary({
@@ -36,7 +47,11 @@ export default function VoiceLibrary({
   onSetDefaultVoice,
   onClearDefaultVoice,
   onAddAlias,
-  onRemoveAlias
+  onRemoveAlias,
+  languageOptions,
+  defaultLanguage,
+  isMultilingual,
+  isLoadingLanguages
 }: VoiceLibraryProps) {
 
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
@@ -215,7 +230,16 @@ export default function VoiceLibrary({
         <CardHeader>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <CardTitle>Voice Library</CardTitle>
+              <div className="flex flex-col">
+                <CardTitle>Voice Library</CardTitle>
+                <span className="text-xs text-muted-foreground">
+                  {isLoadingLanguages
+                    ? 'Prüfe verfügbare Sprachen…'
+                    : isMultilingual
+                      ? 'Multilingual aktiv – Sprachcodes werden validiert'
+                      : 'Einsprachiger Modus – nur Englisch (en) verfügbar'}
+                </span>
+              </div>
               {defaultVoice && onClearDefaultVoice && (
                 <button
                   onClick={handleClearDefault}
@@ -475,7 +499,11 @@ export default function VoiceLibrary({
         open={showUploadModal}
         onOpenChange={setShowUploadModal}
         onUpload={handleUploadVoice}
+        languages={languageOptions}
+        defaultLanguage={defaultLanguage}
+        isMultilingual={isMultilingual}
+        isLoadingLanguages={isLoadingLanguages}
       />
     </>
   );
-} 
+}

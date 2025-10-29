@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  chatterbox-tts-frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://host.docker.internal:4123/v1}
+    container_name: chatterbox-tts-frontend-only
+    environment:
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://host.docker.internal:4123/v1}
+    ports:
+      - "${FRONTEND_PORT:-4321}:80"
+    restart: unless-stopped

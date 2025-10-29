@@ -200,6 +200,48 @@ The frontend uses a reverse proxy to route requests, so when running with `--pro
 
 </details>
 
+### 🎨 Voice Studio Frontend
+
+Die neue Voice-Studio-Oberfläche macht den Workflow aus der Multilingual-Anleitung komplett im Browser bedienbar:
+
+- ✅ Geführter Schritt-für-Schritt-Prozess zum Aktivieren des Multilingual-Modus, Anlegen des Voice-Verzeichnisses und Hochladen neuer Samples.
+- 🌍 Sprachvalidierung direkt gegen <code>GET /v1/languages</code> – falsche ISO-Codes werden sofort abgelehnt.
+- 🗂️ Persistente Voice-Library mit Vorschau, Sprachanzeige, Alias-Verwaltung und Default-Voice-Steuerung.
+- 🧪 Integrierte Hinweise, wie Sie Stimmen testen, versionieren und per Git ins Repository aufnehmen.
+
+#### Frontend separat mit Docker starten
+
+```bash
+# Nur das Voice Studio starten (API muss bereits laufen)
+docker compose -f docker/docker-compose.frontend.yml up --build
+
+# Optional: eigenes API-Endpunkt-Target setzen
+VITE_API_BASE_URL=http://192.168.0.42:4123/v1 \
+  docker compose -f docker/docker-compose.frontend.yml up --build
+```
+
+Der Container bedient die Anwendung auf Port `4321`. Standardmäßig wird die API unter `http://host.docker.internal:4123/v1` angesprochen – passen Sie die Variable `VITE_API_BASE_URL` bei Bedarf an.
+
+#### Lokal entwickeln
+
+```bash
+cd frontend
+npm install
+npm run dev
+# Standard-Endpunkt: http://localhost:4123/v1 (per VITE_API_BASE_URL überschreibbar)
+```
+
+#### Frontend-Tests und Build
+
+```bash
+cd frontend
+npm install
+npm run test   # Node.js Test Runner prüft Workflow & Doku
+npm run build  # Produktions-Bundle
+```
+
+Die GitHub-Action [`frontend-build.yml`](.github/workflows/frontend-build.yml) sorgt automatisch dafür, dass Linting, Tests und Produktions-Build bei Änderungen am Frontend durchlaufen.
+
 ## Screenshots of Frontend (Web UI)
 
 <div align="center">

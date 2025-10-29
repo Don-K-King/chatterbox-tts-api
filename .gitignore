@@ -94,6 +94,8 @@ temp/
 node_modules/
 
 voices/
+!frontend/src/components/voices/
+!frontend/src/components/voices/**/*
 
 coverage.xml
 test_*

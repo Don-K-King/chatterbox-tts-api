@@ -1,39 +1,59 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, X, Check, Loader2, Globe } from 'lucide-react';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalFooter } from './modal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { LANGUAGE_OPTIONS, DEFAULT_LANGUAGE, getLanguageDisplayName } from '../constants/languages';
+import { LANGUAGE_OPTIONS, DEFAULT_LANGUAGE } from '../constants/languages';
 
 interface VoiceUploadModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpload: (file: File, customName?: string, language?: string) => Promise<void>;
+  languages?: { value: string; label: string; code?: string; name?: string }[];
+  defaultLanguage?: string;
+  isMultilingual?: boolean;
+  isLoadingLanguages?: boolean;
 }
 
 type UploadState = 'idle' | 'uploading' | 'success' | 'error';
 
-export default function VoiceUploadModal({ open, onOpenChange, onUpload }: VoiceUploadModalProps) {
+export default function VoiceUploadModal({
+  open,
+  onOpenChange,
+  onUpload,
+  languages,
+  defaultLanguage,
+  isMultilingual,
+  isLoadingLanguages
+}: VoiceUploadModalProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [customName, setCustomName] = useState('');
-  const [selectedLanguage, setSelectedLanguage] = useState<string>(DEFAULT_LANGUAGE);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(defaultLanguage ?? DEFAULT_LANGUAGE);
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const availableLanguages = languages && languages.length > 0 ? languages : LANGUAGE_OPTIONS;
+
+  useEffect(() => {
+    if (open) {
+      setSelectedLanguage(defaultLanguage ?? DEFAULT_LANGUAGE);
+    }
+  }, [defaultLanguage, open]);
 
   const handleClose = useCallback(() => {
     if (uploadState === 'uploading') return; // Prevent closing during upload
 
     setSelectedFile(null);
     setCustomName('');
-    setSelectedLanguage(DEFAULT_LANGUAGE);
+    setSelectedLanguage(defaultLanguage ?? DEFAULT_LANGUAGE);
     setUploadState('idle');
     setIsDragOver(false);
     setErrorMessage('');
     onOpenChange(false);
-  }, [uploadState, onOpenChange]);
+  }, [uploadState, onOpenChange, defaultLanguage]);
 
   const handleFileSelect = useCallback((file: File) => {
     // Validate file type
@@ -246,12 +266,16 @@ export default function VoiceUploadModal({ open, onOpenChange, onUpload }: Voice
                     <Globe className="w-4 h-4" />
                     Language
                   </label>
-                  <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                  <Select
+                    value={selectedLanguage}
+                    onValueChange={setSelectedLanguage}
+                    disabled={isLoadingLanguages}
+                  >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select language" />
                     </SelectTrigger>
                     <SelectContent>
-                      {LANGUAGE_OPTIONS.map((option) => (
+                      {availableLanguages.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -259,7 +283,11 @@ export default function VoiceUploadModal({ open, onOpenChange, onUpload }: Voice
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Select the language this voice will be used for
+                    {isLoadingLanguages
+                      ? 'Lade unterstützte Sprachen vom Server…'
+                      : isMultilingual
+                        ? 'Die Auswahl wird gegen die aktiven Sprachmodelle validiert.'
+                        : 'Aktuell ist nur Englisch (en) aktiviert. Setzen Sie USE_MULTILINGUAL_MODEL=true für 22 Sprachen.'}
                   </p>
                 </div>
               </div>
