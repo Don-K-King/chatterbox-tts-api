@@ -48,6 +48,11 @@ if [ ! -f "voice-sample.mp3" ]; then
     echo "   You can add your own voice sample or use the provided one"
 fi
 
+echo "📁 Seeding default voices (if assets/default-voices is populated)..."
+python -m app.core.voice_seed || {
+    echo "⚠️  Warning: default voice seeding failed";
+}
+
 echo ""
 echo "🎉 Installation complete!"
 echo ""

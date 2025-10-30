@@ -52,6 +52,7 @@ RUN . .venv/bin/activate && python -c "import chatterbox; import perth; print('â
 # Copy application code
 COPY app/ ./app/
 COPY main.py ./
+COPY assets/default-voices/ ./assets/default-voices/
 
 # Copy voice sample if it exists (optional, can be mounted)
 COPY voice-sample.mp3 ./voice-sample.mp3

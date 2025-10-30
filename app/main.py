@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.tts_model import initialize_model
 from app.core.voice_library import get_voice_library
+from app.core.voice_seed import ensure_default_voices_seeded
 from app.core.background_tasks import start_background_processor, stop_background_processor
 from app.api.router import api_router
 from app.config import Config
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI):
     import asyncio
     model_init_task = asyncio.create_task(initialize_model())
     
+    # Seed voice library with bundled defaults (if necessary)
+    ensure_default_voices_seeded()
+
     # Initialize voice library to restore default voice settings
     print("Initializing voice library...")
     voice_lib = get_voice_library()
