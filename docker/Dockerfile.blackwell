@@ -61,6 +61,7 @@ RUN uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-ur
 # Copy application code
 COPY app/ ./app/
 COPY main.py ./
+COPY assets/default-voices/ ./assets/default-voices/
 
 # Copy voice sample if it exists (optional, can be mounted)
 COPY voice-sample.mp3 ./voice-sample.mp3

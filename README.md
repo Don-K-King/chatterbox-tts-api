@@ -29,12 +29,18 @@
 🎤 **Voice Library Management** - Upload, manage, and use custom voices by name  
 📝 **Smart Text Processing** - Automatic chunking for long texts  
 📊 **Real-time Status** - Monitor TTS progress, statistics, and request history  
-🐳 **Docker Ready** - Full containerization with persistent voice storage  
-⚙️ **Configurable** - Extensive environment variable configuration  
-🎛️ **Parameter Control** - Real-time adjustment of speech characteristics  
-📚 **Auto Documentation** - Interactive API docs at `/docs` and `/redoc`  
-🔧 **Type Safety** - Full Pydantic validation for requests and responses  
+🐳 **Docker Ready** - Full containerization with persistent voice storage
+⚙️ **Configurable** - Extensive environment variable configuration
+🎛️ **Parameter Control** - Real-time adjustment of speech characteristics
+📚 **Auto Documentation** - Interactive API docs at `/docs` and `/redoc`
+🔧 **Type Safety** - Full Pydantic validation for requests and responses
 🧠 **Memory Management** - Advanced memory monitoring and automatic cleanup
+
+### 📦 Bundled Default Voices
+
+Dieses Repository kann ein kuratiertes Set an Standard-Stimmen aus `assets/default-voices/` ausliefern. Beim Start der Anwendung
+wird der Ordner automatisch nach `VOICE_LIBRARY_DIR` kopiert, wenn dort noch keine Dateien liegen. Die vollständige Schritt-für-
+Schritt-Anleitung findest du in [docs/DEFAULT_VOICE_LIBRARY_SETUP.md](docs/DEFAULT_VOICE_LIBRARY_SETUP.md).
 
 > [!IMPORTANT]
 > `resemble-ai/chatterbox` is currently broken for non-CUDA setups (see [chatterbox issues](https://github.com/resemble-ai/chatterbox/issues))

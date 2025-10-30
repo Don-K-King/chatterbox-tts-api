@@ -44,6 +44,7 @@ RUN pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
 # Copy application code
 COPY app/ ./app/
 COPY main.py ./
+COPY assets/default-voices/ ./assets/default-voices/
 
 # Copy voice sample if it exists (optional, can be mounted)
 COPY voice-sample.mp3 ./voice-sample.mp3

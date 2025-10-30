@@ -47,7 +47,13 @@ instance/
 # Audio files (except sample)
 *.wav
 *.mp3
+*.flac
+*.ogg
+*.m4a
+*.opus
 !voice-sample.mp3
+!assets/default-voices/
+!assets/default-voices/**/*
 
 # Logs
 *.log
