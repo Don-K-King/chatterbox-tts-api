@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.tts_model import initialize_model
+from app.core.tts_model import initialize_model, wait_for_warmup_completion
 from app.core.voice_library import get_voice_library
 from app.core.voice_seed import ensure_default_voices_seeded
 from app.core.background_tasks import start_background_processor, stop_background_processor
@@ -37,6 +37,16 @@ async def lifespan(app: FastAPI):
     # while the model loads asynchronously
     import asyncio
     model_init_task = asyncio.create_task(initialize_model())
+
+    async def log_warmup_status():
+        try:
+            await wait_for_warmup_completion()
+        except Exception as exc:
+            print(f"✗ Startup warm-up failed: {exc}")
+        else:
+            print("✓ Startup warm-up completed successfully")
+
+    asyncio.create_task(log_warmup_status())
     
     # Seed voice library with bundled defaults (if necessary)
     ensure_default_voices_seeded()

@@ -19,6 +19,8 @@ _initialization_error = None
 _initialization_progress = ""
 _is_multilingual = None
 _supported_languages = {}
+_warmup_task: Optional[asyncio.Task] = None
+_warmup_future: Optional[asyncio.Future] = None
 
 
 class InitializationState(Enum):
@@ -26,6 +28,46 @@ class InitializationState(Enum):
     INITIALIZING = "initializing"
     READY = "ready"
     ERROR = "error"
+
+
+async def _warmup_model() -> None:
+    """Run a minimal generation to warm up the model weights."""
+    global _model
+
+    if _model is None:
+        raise RuntimeError("Model must be initialized before warm-up")
+
+    loop = asyncio.get_event_loop()
+
+    def _run_generation():
+        import torch
+
+        with torch.no_grad():
+            generate_kwargs = {
+                "text": "Warm-up ready!",
+                "audio_prompt_path": Config.VOICE_SAMPLE_PATH,
+                "exaggeration": Config.EXAGGERATION,
+                "cfg_weight": Config.CFG_WEIGHT,
+                "temperature": Config.TEMPERATURE,
+            }
+
+            if _is_multilingual:
+                generate_kwargs["language_id"] = "en"
+
+            audio_tensor = None
+
+            try:
+                audio_tensor = _model.generate(**generate_kwargs)
+
+                if hasattr(audio_tensor, "detach"):
+                    audio_tensor = audio_tensor.detach()
+                if hasattr(audio_tensor, "cpu"):
+                    audio_tensor = audio_tensor.cpu()
+            finally:
+                if audio_tensor is not None:
+                    del audio_tensor
+
+    await loop.run_in_executor(None, _run_generation)
 
 
 async def initialize_model():
@@ -109,6 +151,27 @@ async def initialize_model():
         _initialization_progress = "Model ready"
         _initialization_error = None
         print(f"✓ Model initialized successfully on {_device}")
+
+        global _warmup_task, _warmup_future
+        _warmup_future = loop.create_future()
+
+        def _on_warmup_complete(task: asyncio.Task) -> None:
+            global _warmup_future
+            try:
+                task.result()
+            except Exception as exc:
+                print(f"✗ Model warm-up failed: {exc}")
+                if _warmup_future and not _warmup_future.done():
+                    _warmup_future.set_exception(exc)
+            else:
+                print("✓ Model warm-up completed")
+                if _warmup_future and not _warmup_future.done():
+                    _warmup_future.set_result(True)
+
+        print("Starting model warm-up in background...")
+        _warmup_task = asyncio.create_task(_warmup_model())
+        _warmup_task.add_done_callback(_on_warmup_complete)
+
         return _model
         
     except Exception as e:
@@ -180,3 +243,23 @@ def get_model_info() -> Dict[str, Any]:
         "is_ready": is_ready(),
         "initialization_state": _initialization_state
     }
+
+
+async def wait_for_warmup_completion() -> None:
+    """Wait for the warm-up task to finish."""
+    global _warmup_future
+
+    while True:
+        future = _warmup_future
+        if future is not None:
+            return await asyncio.shield(future)
+
+        if _initialization_state == InitializationState.ERROR.value:
+            raise RuntimeError("Model initialization failed; warm-up unavailable")
+
+        await asyncio.sleep(0.1)
+
+
+def get_warmup_task() -> Optional[asyncio.Task]:
+    """Return the background warm-up task if it exists."""
+    return _warmup_task
