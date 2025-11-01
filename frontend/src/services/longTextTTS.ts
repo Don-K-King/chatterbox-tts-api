@@ -43,6 +43,10 @@ export const createLongTextTTSService = (baseUrl: string, sessionId?: string) =>
         payload.temperature = request.temperature;
       }
 
+      if (request.language !== undefined) {
+        payload.language = request.language;
+      }
+
       if (request.output_format) {
         payload.response_format = request.output_format; // Backend expects 'response_format'
       }
