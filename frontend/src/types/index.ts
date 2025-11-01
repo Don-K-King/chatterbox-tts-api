@@ -119,11 +119,14 @@ export interface APIInfo {
 export interface VoiceSample {
   id: string;
   name: string;
-  file: File;
+  file: File | null;
   audioUrl: string;
   uploadDate: Date;
   aliases?: string[];
   language?: string;
+  originalExtension?: string;
+  convertedToWav?: boolean;
+  convertedFrom?: string | null;
 }
 
 export interface AudioRecord {
@@ -149,6 +152,10 @@ export interface VoiceLibraryItem {
   filename: string;
   original_filename: string;
   file_extension: string;
+  original_extension?: string;
+  converted_to_wav?: boolean;
+  converted_from?: string | null;
+  file_hash?: string;
   file_size: number;
   upload_date: string;
   path: string;

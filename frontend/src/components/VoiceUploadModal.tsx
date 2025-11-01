@@ -214,6 +214,10 @@ export default function VoiceUploadModal({ open, onOpenChange, onUpload }: Voice
             {/* Upload Area */}
             {renderDropZone()}
 
+            <p className="text-xs text-muted-foreground">
+              All uploads are optimised automatically—non-WAV files are converted to high-quality WAV for use across the platform.
+            </p>
+
             {/* Error Message */}
             {errorMessage && uploadState === 'idle' && (
               <div className="text-sm text-destructive bg-destructive/10 rounded p-3">

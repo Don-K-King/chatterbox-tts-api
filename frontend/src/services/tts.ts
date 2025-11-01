@@ -320,6 +320,29 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
     return response.data.voice;
   },
 
+  updateVoiceLanguage: async (voiceName: string, language: string): Promise<void> => {
+    const formData = new FormData();
+    formData.append('language', language);
+
+    const response = await fetch(`${baseUrl}/voices/${encodeURIComponent(voiceName)}/language`, {
+      method: 'PUT',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData?.error?.message || `Language update failed: ${response.status}`);
+    }
+  },
+
+  exportVoices: async (): Promise<Blob> => {
+    const response = await fetch(`${baseUrl}/voices/export`);
+    if (!response.ok) {
+      throw new Error(`Failed to export voices: ${response.status}`);
+    }
+    return response.blob();
+  },
+
   // New status endpoints
   getStatus: async (options?: {
     includeMemory?: boolean;

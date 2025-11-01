@@ -2,18 +2,21 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createTTSService } from '../services/tts';
 import { useApiEndpoint } from './useApiEndpoint';
-import type { VoiceSample, HealthResponse, VoiceLibraryResponse } from '../types';
+import type { VoiceSample, HealthResponse, VoiceLibraryResponse, VoiceLibraryItem } from '../types';
 
 // Convert backend voice data to frontend VoiceSample format
-const convertToVoiceSample = (backendVoice: any): VoiceSample => {
+const convertToVoiceSample = (backendVoice: VoiceLibraryItem): VoiceSample => {
   return {
     id: backendVoice.name, // Use name as ID for backend voices
     name: backendVoice.name,
-    file: null as any, // We don't have the original File object for backend voices
+    file: null,
     audioUrl: '', // We'll generate this on demand via download endpoint
     uploadDate: new Date(backendVoice.upload_date),
     aliases: backendVoice.aliases || [],
-    language: backendVoice.language || 'en' // Default to English if not specified
+    language: backendVoice.language || 'en', // Default to English if not specified
+    originalExtension: backendVoice.original_extension || backendVoice.file_extension,
+    convertedToWav: backendVoice.converted_to_wav ?? false,
+    convertedFrom: backendVoice.converted_from ?? null
   };
 };
 
@@ -50,8 +53,9 @@ export function useVoiceLibrary() {
           voiceSample.audioUrl = URL.createObjectURL(audioBlob);
 
           // Create a File object from the blob for compatibility
+          const fileExtension = backendVoice.file_extension || '.wav';
           voiceSample.file = new File([audioBlob], backendVoice.filename, {
-            type: getAudioMimeType(backendVoice.file_extension)
+            type: getAudioMimeType(fileExtension)
           });
         } catch (error) {
           console.error(`Failed to load audio for voice ${backendVoice.name}:`, error);
@@ -103,20 +107,29 @@ export function useVoiceLibrary() {
 
       // Create new voice sample
       const audioUrl = URL.createObjectURL(file);
-      const voice: VoiceSample = {
+      // Invalidate voices query to refetch the list
+      queryClient.invalidateQueries({ queryKey: ['voices', apiBaseUrl] });
+      // Return a placeholder voice (actual data will refresh via query)
+      const originalExtension = (() => {
+        const parts = file.name.split('.');
+        if (parts.length > 1) {
+          return `.${parts.pop()}`;
+        }
+        return undefined;
+      })();
+
+      return {
         id: voiceName,
         name: voiceName,
         file,
         audioUrl,
         uploadDate: new Date(),
         aliases: [],
-        language: language || 'en'
+        language: language || 'en',
+        originalExtension,
+        convertedToWav: false,
+        convertedFrom: null
       };
-
-      // Invalidate voices query to refetch the list
-      queryClient.invalidateQueries({ queryKey: ['voices', apiBaseUrl] });
-
-      return voice;
     } catch (error) {
       console.error('Error adding voice:', error);
       throw error;
@@ -209,6 +222,16 @@ export function useVoiceLibrary() {
     }
   }, [ttsService, queryClient, apiBaseUrl]);
 
+  const updateVoiceLanguage = useCallback(async (voiceId: string, language: string) => {
+    try {
+      await ttsService.updateVoiceLanguage(voiceId, language);
+      queryClient.invalidateQueries({ queryKey: ['voices', apiBaseUrl] });
+    } catch (error) {
+      console.error('Error updating voice language:', error);
+      throw error;
+    }
+  }, [ttsService, queryClient, apiBaseUrl]);
+
   return {
     voices,
     selectedVoice,
@@ -219,6 +242,7 @@ export function useVoiceLibrary() {
     refreshVoices,
     addAlias,
     removeAlias,
+    updateVoiceLanguage,
     isLoading: voicesQuery.isLoading || healthQuery.isLoading,
     isBackendReady: healthQuery.data?.status === 'healthy' || healthQuery.data?.status === 'initializing',
     healthStatus: healthQuery.data?.status,

@@ -1,19 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Trash2, Play, Pause, Upload, Edit2, Check, X, RefreshCw, Crown, Star, StarOff, Tag, Plus, Globe } from 'lucide-react';
+import { Link } from 'wouter';
+import { Trash2, Play, Pause, Upload, Edit2, Check, X, RefreshCw, Crown, Star, StarOff, Tag, Plus, Globe, Loader2 } from 'lucide-react';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import VoiceUploadModal from './VoiceUploadModal';
 import type { VoiceSample } from '../types';
-import { getLanguageByCode, getLanguageName, DEFAULT_LANGUAGE, getLanguageFlag } from '../constants/languages';
+import { LANGUAGE_OPTIONS, getLanguageName, getLanguageFlag } from '../constants/languages';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 interface VoiceLibraryProps {
   voices: VoiceSample[];
   selectedVoice: VoiceSample | null;
   onVoiceSelect: (voice: VoiceSample | null) => void;
-  onAddVoice: (file: File, customName?: string, language?: string) => Promise<VoiceSample>;
-  onDeleteVoice: (voiceId: string) => Promise<void>;
-  onRenameVoice: (voiceId: string, newName: string) => Promise<void>;
+  onAddVoice?: (file: File, customName?: string, language?: string) => Promise<VoiceSample>;
+  onDeleteVoice?: (voiceId: string) => Promise<void>;
+  onRenameVoice?: (voiceId: string, newName: string) => Promise<void>;
   onRefresh?: () => Promise<void>;
   isLoading: boolean;
   defaultVoice?: string | null;
@@ -21,6 +23,9 @@ interface VoiceLibraryProps {
   onClearDefaultVoice?: () => Promise<boolean>;
   onAddAlias?: (voiceName: string, alias: string) => Promise<boolean>;
   onRemoveAlias?: (voiceName: string, alias: string) => Promise<boolean>;
+  onUpdateLanguage?: (voiceName: string, language: string) => Promise<void>;
+  canManage?: boolean;
+  managerUrl?: string;
 }
 
 export default function VoiceLibrary({
@@ -36,7 +41,10 @@ export default function VoiceLibrary({
   onSetDefaultVoice,
   onClearDefaultVoice,
   onAddAlias,
-  onRemoveAlias
+  onRemoveAlias,
+  onUpdateLanguage,
+  canManage = true,
+  managerUrl
 }: VoiceLibraryProps) {
 
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
@@ -45,6 +53,7 @@ export default function VoiceLibrary({
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [addingAliasFor, setAddingAliasFor] = useState<string | null>(null);
   const [newAlias, setNewAlias] = useState('');
+  const [languageUpdating, setLanguageUpdating] = useState<string | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Cleanup audio when component unmounts
@@ -58,6 +67,7 @@ export default function VoiceLibrary({
   }, []);
 
   const handleUploadVoice = async (file: File, customName?: string, language?: string) => {
+    if (!onAddVoice) return;
     try {
       await onAddVoice(file, customName, language);
     } catch (error) {
@@ -66,6 +76,7 @@ export default function VoiceLibrary({
   };
 
   const handleRename = (voiceId: string, currentName: string) => {
+    if (!canManage || !onRenameVoice) return;
     setEditingVoice(voiceId);
     setEditName(currentName);
   };
@@ -73,6 +84,7 @@ export default function VoiceLibrary({
   const handleSaveRename = async () => {
     if (editingVoice && editName.trim()) {
       try {
+        if (!onRenameVoice) return;
         await onRenameVoice(editingVoice, editName.trim());
         setEditingVoice(null);
         setEditName('');
@@ -88,6 +100,8 @@ export default function VoiceLibrary({
   };
 
   const handleDeleteVoice = async (voiceId: string) => {
+    if (!canManage || !onDeleteVoice) return;
+
     if (confirm('Are you sure you want to delete this voice?')) {
       try {
         await onDeleteVoice(voiceId);
@@ -124,11 +138,13 @@ export default function VoiceLibrary({
   };
 
   const handleAddAlias = (voiceId: string) => {
+    if (!canManage || !onAddAlias) return;
     setAddingAliasFor(voiceId);
     setNewAlias('');
   };
 
   const handleSaveAlias = async () => {
+    if (!canManage) return;
     if (addingAliasFor && newAlias.trim() && onAddAlias) {
       try {
         const success = await onAddAlias(addingAliasFor, newAlias.trim());
@@ -150,6 +166,7 @@ export default function VoiceLibrary({
   };
 
   const handleRemoveAlias = async (voiceId: string, alias: string) => {
+    if (!canManage || !onRemoveAlias) return;
     if (onRemoveAlias) {
       try {
         const success = await onRemoveAlias(voiceId, alias);
@@ -159,6 +176,20 @@ export default function VoiceLibrary({
       } catch (error: any) {
         alert(error.message || 'Failed to remove alias. Please try again.');
       }
+    }
+  };
+
+  const handleLanguageChange = async (voiceId: string, language: string) => {
+    if (!onUpdateLanguage) return;
+
+    setLanguageUpdating(voiceId);
+    try {
+      await onUpdateLanguage(voiceId, language);
+    } catch (error: any) {
+      const message = error?.message || 'Failed to update language. Please try again.';
+      alert(message);
+    } finally {
+      setLanguageUpdating(null);
     }
   };
 
@@ -239,13 +270,25 @@ export default function VoiceLibrary({
                   <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                 </Button>
               )}
-              <Button
-                onClick={() => setShowUploadModal(true)}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-semibold duration-300"
-              >
-                <Upload className="w-4 h-4" />
-                Add Voice
-              </Button>
+              {canManage && onAddVoice && (
+                <Button
+                  onClick={() => setShowUploadModal(true)}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg text-sm flex items-center gap-2 font-semibold duration-300"
+                >
+                  <Upload className="w-4 h-4" />
+                  Add Voice
+                </Button>
+              )}
+              {!canManage && managerUrl && (
+                <Link href={managerUrl}>
+                  <Button
+                    variant="outline"
+                    className="px-4 py-2 text-sm font-semibold duration-300"
+                  >
+                    Manage Voices
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -317,9 +360,47 @@ export default function VoiceLibrary({
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>{voice.uploadDate.toLocaleDateString()} • {(voice.file.size / 1024 / 1024).toFixed(1)}MB</span>
-                            {voice.language && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>
+                              {voice.uploadDate.toLocaleDateString()} • {voice.file ? `${(voice.file.size / 1024 / 1024).toFixed(1)}MB` : '—'}
+                            </span>
+                            {voice.convertedToWav && voice.originalExtension && (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-full">
+                                <span className="text-[10px] font-semibold">WAV</span>
+                                <span className="uppercase text-[10px]">from {voice.originalExtension.replace('.', '')}</span>
+                              </span>
+                            )}
+                            {canManage && onUpdateLanguage ? (
+                              <Select
+                                value={voice.language || 'en'}
+                                onValueChange={(value) => handleLanguageChange(voice.id, value)}
+                                disabled={languageUpdating === voice.id}
+                              >
+                                <SelectTrigger className="h-7 w-fit gap-2 border-none bg-accent/50 text-xs text-accent-foreground">
+                                  {languageUpdating === voice.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <>
+                                      {voice.language && getLanguageFlag(voice.language) ? (
+                                        <span className="text-xs">{getLanguageFlag(voice.language)}</span>
+                                      ) : (
+                                        <Globe className="w-3 h-3" />
+                                      )}
+                                      <SelectValue placeholder="Language">
+                                        {voice.language ? getLanguageName(voice.language) : 'Language'}
+                                      </SelectValue>
+                                    </>
+                                  )}
+                                </SelectTrigger>
+                                <SelectContent className="max-h-64">
+                                  {LANGUAGE_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : voice.language ? (
                               <div className="flex items-center gap-1 px-2 py-1 bg-accent/50 text-accent-foreground rounded-full">
                                 {(getLanguageFlag(voice.language) && getLanguageFlag(voice.language) !== '') ? (
                                   <span className="text-xs font-medium">
@@ -332,7 +413,7 @@ export default function VoiceLibrary({
                                   {getLanguageName(voice.language)}
                                 </span>
                               </div>
-                            )}
+                            ) : null}
                           </div>
 
                           {/* Aliases display */}
@@ -346,7 +427,7 @@ export default function VoiceLibrary({
                                 >
                                   <Tag className="w-3 h-3" />
                                   {alias}
-                                  {onRemoveAlias && (
+                                  {canManage && onRemoveAlias && (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -364,7 +445,7 @@ export default function VoiceLibrary({
                           )}
 
                           {/* Add alias input */}
-                          {addingAliasFor === voice.id && (
+                          {canManage && addingAliasFor === voice.id && (
                             <div className="flex items-center gap-2 mt-2">
                               <Input
                                 type="text"
@@ -418,7 +499,7 @@ export default function VoiceLibrary({
                         </button>
                       )}
                       {/* Add Alias Button - only show if we have the handler */}
-                      {onAddAlias && addingAliasFor !== voice.id && (
+                      {canManage && onAddAlias && addingAliasFor !== voice.id && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -433,9 +514,12 @@ export default function VoiceLibrary({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          playPreview(voice);
+                          if (voice.audioUrl) {
+                            playPreview(voice);
+                          }
                         }}
-                        className="p-1 hover:bg-accent rounded transition-colors duration-300"
+                        className={`p-1 rounded transition-colors duration-300 ${voice.audioUrl ? 'hover:bg-accent' : 'cursor-not-allowed opacity-60'}`}
+                        disabled={!voice.audioUrl}
                       >
                         {playingVoice === voice.id && currentAudioRef.current && !currentAudioRef.current.paused ? (
                           <Pause className="w-4 h-4 text-muted-foreground" />
@@ -443,24 +527,30 @@ export default function VoiceLibrary({
                           <Play className="w-4 h-4 text-muted-foreground" />
                         )}
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRename(voice.id, voice.name);
-                        }}
-                        className="p-1 hover:bg-accent rounded transition-colors duration-300"
-                      >
-                        <Edit2 className="w-4 h-4 text-muted-foreground" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteVoice(voice.id);
-                        }}
-                        className="p-1 hover:bg-destructive/10 text-destructive rounded transition-colors duration-300"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canManage && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRename(voice.id, voice.name);
+                            }}
+                            className="p-1 hover:bg-accent rounded transition-colors duration-300"
+                            disabled={!onRenameVoice}
+                          >
+                            <Edit2 className="w-4 h-4 text-muted-foreground" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteVoice(voice.id);
+                            }}
+                            className="p-1 hover:bg-destructive/10 text-destructive rounded transition-colors duration-300"
+                            disabled={!onDeleteVoice}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -471,11 +561,13 @@ export default function VoiceLibrary({
       </Card>
 
       {/* Voice Upload Modal */}
-      <VoiceUploadModal
-        open={showUploadModal}
-        onOpenChange={setShowUploadModal}
-        onUpload={handleUploadVoice}
-      />
+      {canManage && onAddVoice && (
+        <VoiceUploadModal
+          open={showUploadModal}
+          onOpenChange={setShowUploadModal}
+          onUpload={handleUploadVoice}
+        />
+      )}
     </>
   );
-} 
+}
