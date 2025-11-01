@@ -180,6 +180,7 @@ export default function TTSPage() {
   // Default voice management with backend health monitoring
   const {
     defaultVoice,
+    defaultVoiceInfo,
     updateDefaultVoice,
     clearDefaultVoice,
     isLoading: defaultVoiceLoading,
@@ -192,6 +193,27 @@ export default function TTSPage() {
 
   // Create TTS service with current API base URL and session ID
   const ttsService = useMemo(() => createTTSService(apiBaseUrl, sessionId), [apiBaseUrl, sessionId]);
+
+  const resolvedDefaultVoiceName = useMemo(() => {
+    if (defaultVoice) {
+      return defaultVoice;
+    }
+    return defaultVoiceInfo?.name;
+  }, [defaultVoice, defaultVoiceInfo]);
+
+  const resolvedDefaultVoiceLanguage = useMemo(() => {
+    if (defaultVoice) {
+      const matchingVoice = voices.find(voice => voice.name === defaultVoice);
+      if (matchingVoice?.language) {
+        return matchingVoice.language;
+      }
+    }
+    return defaultVoiceInfo?.language;
+  }, [voices, defaultVoice, defaultVoiceInfo]);
+
+  const voiceNameForHistory = useMemo(() => {
+    return selectedVoice?.name || resolvedDefaultVoiceName || defaultVoice || 'Default';
+  }, [selectedVoice, resolvedDefaultVoiceName, defaultVoice]);
 
   // Status monitoring with real-time updates
   const {
@@ -271,8 +293,8 @@ export default function TTSPage() {
             exaggeration,
             cfgWeight,
             temperature,
-            voiceId: selectedVoice?.id,
-            voiceName: selectedVoice?.name || defaultVoice || "Default"
+            voiceId: selectedVoice?.id || resolvedDefaultVoiceName || undefined,
+            voiceName: voiceNameForHistory
           }
         );
       } catch (error) {
@@ -296,7 +318,8 @@ export default function TTSPage() {
     // Check if we should use long text processing
     if (shouldUseLongText(text)) {
 
-      const language = selectedVoice?.language?.toLowerCase();
+      const voiceNameToUse = selectedVoice?.name || resolvedDefaultVoiceName;
+      const language = (selectedVoice?.language || resolvedDefaultVoiceLanguage)?.toLowerCase();
 
       setTimeout(() => {
         setIsClickedGenerating(false);
@@ -305,7 +328,7 @@ export default function TTSPage() {
       // Use long text TTS
       const longTextRequest: LongTextRequest = {
         text,
-        voice: selectedVoice?.name,
+        ...(voiceNameToUse ? { voice: voiceNameToUse } : {}),
         exaggeration,
         cfg_weight: cfgWeight,
         temperature,
@@ -342,18 +365,19 @@ export default function TTSPage() {
       session_id: sessionId
     };
 
-    if (selectedVoice) {
-      // Use voice name for backend voice library
-      requestData.voice = selectedVoice.name;
+    const voiceNameToUse = selectedVoice?.name || resolvedDefaultVoiceName;
+    const languageToUse = (selectedVoice?.language || resolvedDefaultVoiceLanguage)?.toLowerCase();
 
-      // Also include voice file if it's a client-side voice (for backward compatibility)
-      if (selectedVoice.file) {
-        requestData.voice_file = selectedVoice.file;
-      }
+    if (voiceNameToUse) {
+      requestData.voice = voiceNameToUse;
+    }
 
-      if (selectedVoice.language) {
-        requestData.language = selectedVoice.language.toLowerCase();
-      }
+    if (selectedVoice?.file) {
+      requestData.voice_file = selectedVoice.file;
+    }
+
+    if (languageToUse) {
+      requestData.language = languageToUse;
     }
 
     // Track this request
@@ -377,8 +401,8 @@ export default function TTSPage() {
                 exaggeration,
                 cfgWeight,
                 temperature,
-                voiceId: selectedVoice?.id,
-                voiceName: selectedVoice?.name || defaultVoice || "Default"
+                voiceId: selectedVoice?.id || resolvedDefaultVoiceName || undefined,
+                voiceName: voiceNameForHistory
               }
             );
           } catch (error) {
