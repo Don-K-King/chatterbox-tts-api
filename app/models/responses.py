@@ -95,10 +95,12 @@ class TTSProgressResponse(BaseModel):
 
 class TTSStatusResponse(BaseModel):
     """TTS status response model"""
-    
+
     status: str
     is_processing: bool
     request_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    session_id: Optional[str] = None
     start_time: Optional[float] = None
     duration_seconds: Optional[float] = None
     text_length: Optional[int] = None

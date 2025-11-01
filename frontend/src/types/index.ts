@@ -10,6 +10,7 @@ export interface TTSRequest {
   streaming_chunk_size?: number;
   streaming_strategy?: 'sentence' | 'paragraph' | 'fixed' | 'word';
   streaming_quality?: 'fast' | 'balanced' | 'high';
+  language?: string;
 }
 
 export interface HealthResponse {

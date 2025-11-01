@@ -22,6 +22,10 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
       formData.append('temperature', request.temperature.toString());
     }
 
+    if (request.language) {
+      formData.append('language', request.language);
+    }
+
     if (request.voice_file) {
       formData.append('voice_file', request.voice_file);
     }
@@ -152,6 +156,10 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
 
     if (request.temperature !== undefined) {
       formData.append('temperature', request.temperature.toString());
+    }
+
+    if (request.language) {
+      formData.append('language', request.language);
     }
 
     if (request.voice_file) {
