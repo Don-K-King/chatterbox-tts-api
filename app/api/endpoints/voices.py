@@ -308,6 +308,36 @@ async def upload_voice(
 
 
 @router.get(
+    "/voices/export",
+    responses={
+        200: {"description": "Voice library exported successfully"},
+        500: {"model": ErrorResponse}
+    },
+    summary="Export voice library",
+    description="Export all voices and metadata as a ZIP archive"
+)
+async def export_voice_library():
+    """Export the entire voice library as a ZIP archive."""
+
+    try:
+        voice_lib = get_voice_library()
+        export_path = voice_lib.export_library()
+        filename = os.path.basename(export_path)
+
+        return FileResponse(
+            export_path,
+            filename=filename,
+            media_type="application/zip",
+            background=BackgroundTask(lambda: os.remove(export_path))
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": {"message": f"Failed to export voice library: {str(e)}", "type": "voice_library_error"}}
+        )
+
+
+@router.get(
     "/voices/{voice_name}",
     responses={
         200: {"description": "Voice information"},
@@ -454,36 +484,6 @@ async def update_voice_language(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": {"message": f"Failed to update voice language: {str(e)}", "type": "voice_library_error"}}
-        )
-
-
-@router.get(
-    "/voices/export",
-    responses={
-        200: {"description": "Voice library exported successfully"},
-        500: {"model": ErrorResponse}
-    },
-    summary="Export voice library",
-    description="Export all voices and metadata as a ZIP archive"
-)
-async def export_voice_library():
-    """Export the entire voice library as a ZIP archive."""
-
-    try:
-        voice_lib = get_voice_library()
-        export_path = voice_lib.export_library()
-        filename = os.path.basename(export_path)
-
-        return FileResponse(
-            export_path,
-            filename=filename,
-            media_type="application/zip",
-            background=BackgroundTask(lambda: os.remove(export_path))
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": {"message": f"Failed to export voice library: {str(e)}", "type": "voice_library_error"}}
         )
 
 
