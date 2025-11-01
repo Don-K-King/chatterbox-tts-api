@@ -80,4 +80,6 @@ temp/
 # Large test files
 *.wav
 *.mp3
-!voice-sample.mp3 
+!assets/default-voices/*.wav
+!assets/default-voices/*.mp3
+!voice-sample.mp3
