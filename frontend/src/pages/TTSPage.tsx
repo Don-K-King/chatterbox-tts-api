@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Volume2 } from 'lucide-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '../components/ui/button';
@@ -62,10 +62,12 @@ export default function TTSPage() {
     settings: progressSettings,
     updateSettings: updateProgressSettings,
     trackRequest,
+    isMyRequest,
     shouldShowProgress,
     dismissProgress,
     isLongTextRequest,
-    sessionId
+    sessionId,
+    currentRequestId
   } = useProgressSettings();
 
   // Streaming TTS management
@@ -199,6 +201,27 @@ export default function TTSPage() {
     hasError: statusHasError,
     isLoadingStats
   } = useStatusMonitoring(apiBaseUrl);
+
+  const backendRequestId = progress?.request_id;
+  const isProgressProcessing = progress?.is_processing;
+
+  useEffect(() => {
+    if (!isProgressProcessing || !backendRequestId || !currentRequestId) {
+      return;
+    }
+
+    if (!isMyRequest(backendRequestId)) {
+      const requestType = isLongTextRequest(currentRequestId) ? 'long-text' : 'regular';
+      trackRequest(backendRequestId, requestType);
+    }
+  }, [
+    backendRequestId,
+    currentRequestId,
+    isProgressProcessing,
+    isMyRequest,
+    isLongTextRequest,
+    trackRequest
+  ]);
 
   const { data: health, isLoading: isLoadingHealth } = useQuery({
     queryKey: ['health', apiBaseUrl],
