@@ -119,6 +119,8 @@ class VoiceLibrary:
 
         voices = self._metadata.get("voices", {})
         updated = False
+        default_updated = False
+        current_default_path = self._config.get("default_voice_path")
 
         for voice_name, metadata in list(voices.items()):
             voice_path = Path(metadata.get("path", ""))
@@ -142,6 +144,14 @@ class VoiceLibrary:
                 metadata["converted_to_wav"] = True
                 metadata["file_hash"] = self._get_file_hash(wav_path)
                 updated = True
+
+                if current_default_path and current_default_path == str(voice_path):
+                    new_default_path = str(wav_path)
+                    self._config["default_voice_path"] = new_default_path
+                    if Config.VOICE_SAMPLE_PATH == str(voice_path):
+                        Config.VOICE_SAMPLE_PATH = new_default_path
+                    current_default_path = new_default_path
+                    default_updated = True
             else:
                 metadata.setdefault("converted_to_wav", False)
                 metadata.setdefault("original_extension", original_extension)
@@ -150,6 +160,9 @@ class VoiceLibrary:
 
         if updated:
             self._save_metadata()
+
+        if default_updated:
+            self._save_config()
 
     # ---------------------------------------------------------------------
     # Public API
