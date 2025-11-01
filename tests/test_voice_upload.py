@@ -34,7 +34,8 @@ def test_voice_upload():
             f"{BASE_URL}/v1/audio/speech",
             json={
                 "input": "Hello! This is using the default configured voice sample.",
-                "exaggeration": 0.7
+                "exaggeration": 0.7,
+                "conversation_id": "voice-upload-json",
             },
             timeout=60
         )
@@ -58,7 +59,8 @@ def test_voice_upload():
             data={
                 "input": "Hello! This is using the upload endpoint without a file.",
                 "exaggeration": 0.6,
-                "temperature": 0.9
+                "temperature": 0.9,
+                "conversation_id": "voice-upload-form",
             },
             timeout=60
         )
@@ -101,7 +103,8 @@ def test_voice_upload():
                         "input": "Amazing! This is using an uploaded custom voice file.",
                         "exaggeration": 0.8,
                         "cfg_weight": 0.4,
-                        "temperature": 1.0
+                        "temperature": 1.0,
+                        "conversation_id": "voice-upload-custom",
                     },
                     files={
                         "voice_file": ("custom_voice.mp3", voice_file, "audio/mpeg")
@@ -133,6 +136,7 @@ def test_voice_upload():
             f"{BASE_URL}/v1/audio/speech/upload",
             data={
                 "input": "This should fail due to invalid voice file.",
+                "conversation_id": "voice-upload-invalid",
             },
             files={
                 "voice_file": ("invalid.txt", dummy_file_content, "text/plain")
@@ -157,6 +161,7 @@ def test_voice_upload():
             f"{BASE_URL}/v1/audio/speech",
             json={
                 "input": "",  # Empty input
+                "conversation_id": "voice-upload-empty-json",
             },
             timeout=30
         )
@@ -176,6 +181,7 @@ def test_voice_upload():
             f"{BASE_URL}/v1/audio/speech/upload",
             data={
                 "input": "",  # Empty input
+                "conversation_id": "voice-upload-empty-form",
             },
             timeout=30
         )
