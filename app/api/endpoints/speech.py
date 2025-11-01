@@ -56,6 +56,59 @@ REQUEST_COUNTER = 0
 SUPPORTED_AUDIO_FORMATS = {'.mp3', '.wav', '.flac', '.m4a', '.ogg'}
 
 
+async def ensure_wav_voice_sample(path: str) -> str:
+    """Ensure the provided voice sample is available as a WAV file.
+
+    Uploaded voice samples can arrive in a variety of formats. The
+    underlying TTS model expects WAV prompts, so we convert any
+    non-WAV uploads to WAV before caching/processing. The conversion
+    happens in a thread to avoid blocking the event loop.
+
+    Args:
+        path: Path to the uploaded voice sample.
+
+    Returns:
+        Path to a WAV file representing the same audio content.
+
+    Raises:
+        HTTPException: If the conversion fails.
+    """
+
+    _, ext = os.path.splitext(path)
+    if ext.lower() == ".wav":
+        return path
+
+    wav_path = os.path.splitext(path)[0] + ".wav"
+
+    def _convert_to_wav() -> str:
+        waveform, sample_rate = ta.load(path)
+        ta.save(wav_path, waveform, sample_rate, format="wav")
+        return wav_path
+
+    try:
+        wav_path = await asyncio.to_thread(_convert_to_wav)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error("Failed to convert voice sample %s to WAV: %s", path, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": f"Failed to convert voice sample to WAV: {exc}",
+                    "type": "invalid_request_error",
+                }
+            },
+        ) from exc
+
+    await invalidate_voice_prompt(path)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:  # pragma: no cover - best effort cleanup
+        pass
+
+    logger.info("Converted voice sample %s to WAV at %s", path, wav_path)
+    return wav_path
+
+
 try:
     from prometheus_client import Counter as PrometheusCounter
 except Exception:  # pragma: no cover - optional dependency safety
@@ -1107,7 +1160,31 @@ async def text_to_speech_with_upload(
             
             voice_sample_path = temp_voice_path
             print(f"Using uploaded voice file: {voice_file.filename} ({len(file_content):,} bytes)")
-            
+
+            # Convert non-WAV uploads to WAV for consistent processing
+            if file_ext.lower() != ".wav":
+                try:
+                    voice_sample_path = await ensure_wav_voice_sample(voice_sample_path)
+                    temp_voice_path = voice_sample_path
+                    print(f"🎚️ Converted uploaded voice file to WAV: {voice_sample_path}")
+                except HTTPException:
+                    raise
+                except Exception as convert_error:
+                    if temp_voice_path and os.path.exists(temp_voice_path):
+                        try:
+                            os.unlink(temp_voice_path)
+                        except OSError:
+                            pass
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "error": {
+                                "message": f"Failed to convert voice file to WAV: {convert_error}",
+                                "type": "file_processing_error",
+                            }
+                        },
+                    ) from convert_error
+
         except HTTPException:
             raise
         except Exception as e:
@@ -1329,7 +1406,31 @@ async def stream_text_to_speech_with_upload(
             
             voice_sample_path = temp_voice_path
             print(f"Using uploaded voice file for streaming: {voice_file.filename} ({len(file_content):,} bytes)")
-            
+
+            # Convert non-WAV uploads to WAV for consistent processing
+            if file_ext.lower() != ".wav":
+                try:
+                    voice_sample_path = await ensure_wav_voice_sample(voice_sample_path)
+                    temp_voice_path = voice_sample_path
+                    print(f"🎚️ Converted uploaded streaming voice file to WAV: {voice_sample_path}")
+                except HTTPException:
+                    raise
+                except Exception as convert_error:
+                    if temp_voice_path and os.path.exists(temp_voice_path):
+                        try:
+                            os.unlink(temp_voice_path)
+                        except OSError:
+                            pass
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "error": {
+                                "message": f"Failed to convert voice file to WAV: {convert_error}",
+                                "type": "file_processing_error",
+                            }
+                        },
+                    ) from convert_error
+
         except HTTPException:
             raise
         except Exception as e:
