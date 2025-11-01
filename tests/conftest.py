@@ -20,6 +20,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 BASE_URL = os.getenv("CHATTERBOX_TEST_URL", "http://localhost:4123")
 TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT", "600"))
 API_HEALTH_TIMEOUT = int(os.getenv("API_HEALTH_TIMEOUT", "5"))
+SKIP_API_HEALTH_CHECK = os.getenv("CHATTERBOX_SKIP_API_HEALTH", "false").lower() == "true"
 
 # Test data
 TEST_TEXTS = {
@@ -107,6 +108,8 @@ def api_client():
 @pytest.fixture(scope="session", autouse=True)
 def check_api_health(api_client):
     """Ensure API is running before running tests"""
+    if SKIP_API_HEALTH_CHECK:
+        return
     if not api_client.wait_for_health():
         pytest.skip(f"API not available at {BASE_URL}. Please start the server first.")
 
