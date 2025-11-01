@@ -97,6 +97,7 @@ Generate speech from text using the Chatterbox TTS model.
 ```json
 {
   "input": "Text to convert to speech",
+  "conversation_id": "stable-session-id",
   "voice": "alloy", // OpenAI voice name or custom voice library name
   "response_format": "wav", // Ignored - always returns WAV
   "speed": 1.0, // Ignored - use model's built-in parameters
@@ -109,9 +110,13 @@ Generate speech from text using the Chatterbox TTS model.
 **Validation:**
 
 - `input`: Required, 1-3000 characters, automatically trimmed
+- `conversation_id`: Required, must contain non-whitespace characters (aliases: `conversationId`, `session`, `session_id`, `sessionId`)
 - `exaggeration`: Optional, 0.25-2.0 range validation
 - `cfg_weight`: Optional, 0.0-1.0 range validation
 - `temperature`: Optional, 0.05-5.0 range validation
+
+> **Conversation IDs**
+> Provide a stable `conversation_id` field (or the aliases listed above) to enable caching and serialized request handling. The same value may also be supplied via the `X-Conversation-ID` header. If the `ALLOW_MISSING_CONVERSATION_ID` feature flag is enabled, the API will generate a temporary ID but caching benefits are disabled.
 
 **Response:**
 
@@ -123,7 +128,7 @@ Generate speech from text using the Chatterbox TTS model.
 ```bash
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Hello, this is a test of the text to speech system."}' \
+  -d '{"input": "Hello, this is a test of the text to speech system.", "conversation_id": "guide-example-1"}' \
   --output speech.wav
 ```
 
@@ -132,7 +137,7 @@ curl -X POST http://localhost:4123/v1/audio/speech \
 ```bash
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Dramatic speech!", "exaggeration": 1.2, "cfg_weight": 0.3}' \
+  -d '{"input": "Dramatic speech!", "exaggeration": 1.2, "cfg_weight": 0.3, "conversation_id": "guide-example-2"}' \
   --output dramatic.wav
 ```
 
@@ -141,7 +146,7 @@ curl -X POST http://localhost:4123/v1/audio/speech \
 ```bash
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Hello with custom voice!", "voice": "my-uploaded-voice"}' \
+  -d '{"input": "Hello with custom voice!", "voice": "my-uploaded-voice", "conversation_id": "guide-example-3"}' \
   --output custom_voice.wav
 ```
 
@@ -440,13 +445,13 @@ if (response.status === 422) {
 # Basic usage
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Your text here"}' \
+  -d '{"input": "Your text here", "conversation_id": "guide-shell-1"}' \
   --output output.wav
 
 # With custom parameters
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Dramatic text!", "exaggeration": 1.0, "cfg_weight": 0.3}' \
+  -d '{"input": "Dramatic text!", "exaggeration": 1.0, "cfg_weight": 0.3, "conversation_id": "guide-shell-2"}' \
   --output dramatic.wav
 
 # Test the interactive documentation

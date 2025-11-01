@@ -7,6 +7,7 @@ import sys
 import pytest
 import requests
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -57,6 +58,14 @@ class APIClient:
         """Make POST request"""
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         timeout = kwargs.pop('timeout', self.timeout)
+        if 'json' in kwargs and isinstance(kwargs['json'], dict):
+            payload = dict(kwargs['json'])
+            payload.setdefault('conversation_id', f"client-{uuid.uuid4().hex}")
+            kwargs['json'] = payload
+        if 'data' in kwargs and isinstance(kwargs['data'], dict):
+            data_payload = dict(kwargs['data'])
+            data_payload.setdefault('conversation_id', f"client-{uuid.uuid4().hex}")
+            kwargs['data'] = data_payload
         return requests.post(url, timeout=timeout, **kwargs)
     
     def put(self, endpoint: str, **kwargs) -> requests.Response:
