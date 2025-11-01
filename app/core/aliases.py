@@ -21,6 +21,7 @@ ENDPOINT_ALIASES: Dict[str, List[str]] = {
     "/voices/{voice_name}/aliases/{alias}": ["/v1/voices/{voice_name}/aliases/{alias}"],
     "/voices/all-names": ["/v1/voices/all-names"],
     "/voices/cleanup": ["/v1/voices/cleanup"],
+    "/voices/export": ["/v1/voices/export"],
     "/health": ["/v1/health", "/status"],
     "/models": ["/v1/models"],
     "/config": ["/v1/config"],
