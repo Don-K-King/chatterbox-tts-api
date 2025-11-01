@@ -34,7 +34,7 @@ from app.core import (
     split_text_into_chunks, concatenate_audio_chunks, add_route_aliases,
     TTSStatus, start_tts_request, update_tts_status, get_voice_library
 )
-from app.core.tts_model import get_model, is_multilingual
+from app.core.tts_model import get_model, is_multilingual, supports_language
 from app.core.text_processing import split_text_for_streaming, get_streaming_settings
 from app.core.tts_cache import (
     get_or_load_voice_prompt,
@@ -353,8 +353,10 @@ async def generate_speech_internal(
             "exaggeration": exaggeration,
             "cfg_weight": cfg_weight,
             "temperature": temperature,
-            "voice_sample_path": voice_sample_path
-        }
+            "voice_sample_path": voice_sample_path,
+            "language": language_id
+        },
+        conversation_id=conversation_id
     )
     
     update_tts_status(request_id, TTSStatus.INITIALIZING, "Checking model availability")
@@ -592,8 +594,10 @@ async def generate_speech_streaming(
             "streaming": True,
             "streaming_chunk_size": streaming_chunk_size,
             "streaming_strategy": streaming_strategy,
-            "streaming_quality": streaming_quality
-        }
+            "streaming_quality": streaming_quality,
+            "language": language_id
+        },
+        conversation_id=conversation_id
     )
     
     update_tts_status(request_id, TTSStatus.INITIALIZING, "Checking model availability (streaming)")
@@ -797,8 +801,10 @@ async def generate_speech_sse(
             "streaming_format": "sse",
             "streaming_chunk_size": streaming_chunk_size,
             "streaming_strategy": streaming_strategy,
-            "streaming_quality": streaming_quality
-        }
+            "streaming_quality": streaming_quality,
+            "language": language_id
+        },
+        conversation_id=conversation_id
     )
     
     update_tts_status(request_id, TTSStatus.INITIALIZING, "Checking model availability (SSE streaming)")
@@ -1012,10 +1018,30 @@ async def generate_speech_sse(
 )
 async def text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
     """Generate speech from text using Chatterbox TTS with voice selection support"""
-    
+
     # Resolve voice name to file path and language
     voice_sample_path, language_id = resolve_voice_path_and_language(request.voice)
-    
+
+    if request.language:
+        override_language = request.language
+        if is_multilingual():
+            if supports_language(override_language):
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Unsupported language override '%s' requested; keeping voice language '%s'",
+                    override_language,
+                    language_id,
+                )
+        else:
+            if override_language == "en":
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Language override '%s' ignored because the current model is monolingual",
+                    override_language,
+                )
+
     # Check if SSE streaming is requested
     if request.stream_format == "sse":
         # Return SSE streaming response
@@ -1081,6 +1107,7 @@ async def text_to_speech_with_upload(
     exaggeration: Optional[float] = Form(None, description="Emotion intensity (0.25-2.0)", ge=0.25, le=2.0),
     cfg_weight: Optional[float] = Form(None, description="Pace control (0.0-1.0)", ge=0.0, le=1.0),
     temperature: Optional[float] = Form(None, description="Sampling temperature (0.05-5.0)", ge=0.05, le=5.0),
+    language: Optional[str] = Form(None, description="Language code override (e.g., 'en', 'de')", min_length=2, max_length=5),
     streaming_chunk_size: Optional[int] = Form(None, description="Characters per streaming chunk (50-500)", ge=50, le=500),
     streaming_strategy: Optional[str] = Form(None, description="Chunking strategy (sentence, paragraph, fixed, word)"),
     streaming_quality: Optional[str] = Form(None, description="Quality preset (fast, balanced, high)"),
@@ -1203,7 +1230,27 @@ async def text_to_speech_with_upload(
                     }
                 }
             )
-    
+
+    override_language = language.strip().lower() if language else None
+    if override_language:
+        if is_multilingual():
+            if supports_language(override_language):
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Unsupported language override '%s' requested; keeping voice language '%s'",
+                    override_language,
+                    language_id,
+                )
+        else:
+            if override_language == "en":
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Language override '%s' ignored because the current model is monolingual",
+                    override_language,
+                )
+
     try:
         # Check if SSE streaming is requested
         if stream_format == "sse":
@@ -1292,7 +1339,27 @@ async def stream_text_to_speech(request: TTSRequest = Depends(parse_tts_request)
     
     # Resolve voice name to file path and language
     voice_sample_path, language_id = resolve_voice_path_and_language(request.voice)
-    
+
+    if request.language:
+        override_language = request.language
+        if is_multilingual():
+            if supports_language(override_language):
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Unsupported language override '%s' requested; keeping voice language '%s'",
+                    override_language,
+                    language_id,
+                )
+        else:
+            if override_language == "en":
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Language override '%s' ignored because the current model is monolingual",
+                    override_language,
+                )
+
     # Create streaming response
     return StreamingResponse(
         generate_speech_streaming(
@@ -1336,6 +1403,7 @@ async def stream_text_to_speech_with_upload(
     exaggeration: Optional[float] = Form(None, description="Emotion intensity (0.25-2.0)", ge=0.25, le=2.0),
     cfg_weight: Optional[float] = Form(None, description="Pace control (0.0-1.0)", ge=0.0, le=1.0),
     temperature: Optional[float] = Form(None, description="Sampling temperature (0.05-5.0)", ge=0.05, le=5.0),
+    language: Optional[str] = Form(None, description="Language code override (e.g., 'en', 'de')", min_length=2, max_length=5),
     streaming_chunk_size: Optional[int] = Form(None, description="Characters per streaming chunk (50-500)", ge=50, le=500),
     streaming_strategy: Optional[str] = Form(None, description="Chunking strategy (sentence, paragraph, fixed, word)"),
     streaming_quality: Optional[str] = Form(None, description="Quality preset (fast, balanced, high)"),
@@ -1449,7 +1517,27 @@ async def stream_text_to_speech_with_upload(
                     }
                 }
             )
-    
+
+    override_language = language.strip().lower() if language else None
+    if override_language:
+        if is_multilingual():
+            if supports_language(override_language):
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Unsupported language override '%s' requested; keeping voice language '%s'",
+                    override_language,
+                    language_id,
+                )
+        else:
+            if override_language == "en":
+                language_id = override_language
+            else:
+                logger.warning(
+                    "Language override '%s' ignored because the current model is monolingual",
+                    override_language,
+                )
+
     # Create async generator that handles cleanup
     async def streaming_with_cleanup():
         try:

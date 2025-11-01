@@ -95,10 +95,12 @@ class TTSProgressResponse(BaseModel):
 
 class TTSStatusResponse(BaseModel):
     """TTS status response model"""
-    
+
     status: str
     is_processing: bool
     request_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    session_id: Optional[str] = None
     start_time: Optional[float] = None
     duration_seconds: Optional[float] = None
     text_length: Optional[int] = None
@@ -140,11 +142,15 @@ class APIInfoResponse(BaseModel):
 
 class VoiceLibraryItem(BaseModel):
     """Voice library item response model"""
-    
+
     name: str
     filename: str
     original_filename: str
     file_extension: str
+    original_extension: Optional[str] = None
+    converted_to_wav: bool = False
+    converted_from: Optional[str] = None
+    file_hash: Optional[str] = None
     file_size: int
     upload_date: str
     path: str

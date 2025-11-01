@@ -29,7 +29,8 @@ class TTSRequest(BaseModel):
     response_format: Optional[str] = Field("wav", description="Audio format (always returns WAV)")
     speed: Optional[float] = Field(1.0, description="Speed of speech (ignored)")
     stream_format: Optional[str] = Field("audio", description="Streaming format: 'audio' for raw audio stream, 'sse' for Server-Side Events")
-    
+    language: Optional[str] = Field(None, description="Override language for multilingual voices (e.g., 'en', 'de')")
+
     # Custom TTS parameters
     exaggeration: Optional[float] = Field(None, description="Emotion intensity", ge=0.25, le=2.0)
     cfg_weight: Optional[float] = Field(None, description="Pace control", ge=0.0, le=1.0)
@@ -75,4 +76,18 @@ class TTSRequest(BaseModel):
             allowed_qualities = ['fast', 'balanced', 'high']
             if v not in allowed_qualities:
                 raise ValueError(f'streaming_quality must be one of: {", ".join(allowed_qualities)}')
-        return v 
+        return v
+
+    @validator('language')
+    def validate_language(cls, v):
+        if v is None:
+            return v
+
+        value = str(v).strip().lower()
+        if not value:
+            return None
+
+        if not (2 <= len(value) <= 5):
+            raise ValueError('language must be between 2 and 5 characters')
+
+        return value

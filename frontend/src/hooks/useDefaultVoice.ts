@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { createTTSService } from '../services/tts';
 import { useApiEndpoint } from './useApiEndpoint';
-import type { DefaultVoiceResponse, HealthResponse } from '../types';
+import type { DefaultVoiceResponse, HealthResponse, VoiceLibraryItem } from '../types';
 
 export function useDefaultVoice() {
   const [defaultVoice, setDefaultVoice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [defaultVoiceInfo, setDefaultVoiceInfo] = useState<VoiceLibraryItem | undefined>(undefined);
+  const [defaultVoiceSource, setDefaultVoiceSource] = useState<'voice_library' | 'file_system'>('file_system');
   const { apiBaseUrl } = useApiEndpoint();
 
   // Memoize ttsService to prevent recreation on every render
@@ -45,6 +47,8 @@ export function useDefaultVoice() {
   useEffect(() => {
     if (defaultVoiceQuery.data) {
       setDefaultVoice(defaultVoiceQuery.data.default_voice);
+      setDefaultVoiceInfo(defaultVoiceQuery.data.voice_info);
+      setDefaultVoiceSource(defaultVoiceQuery.data.source);
       setError(null);
     } else if (defaultVoiceQuery.error) {
       console.error('Failed to load default voice:', defaultVoiceQuery.error);
@@ -58,6 +62,7 @@ export function useDefaultVoice() {
       setError(null);
       await ttsService.setDefaultVoice(voiceName);
       setDefaultVoice(voiceName);
+      setDefaultVoiceSource('voice_library');
       // Refetch to sync with backend
       defaultVoiceQuery.refetch();
       return true;
@@ -74,6 +79,8 @@ export function useDefaultVoice() {
       setError(null);
       await ttsService.clearDefaultVoice();
       setDefaultVoice(null);
+      setDefaultVoiceInfo(undefined);
+      setDefaultVoiceSource('file_system');
       // Refetch to sync with backend
       defaultVoiceQuery.refetch();
       return true;
@@ -86,6 +93,8 @@ export function useDefaultVoice() {
 
   return {
     defaultVoice,
+    defaultVoiceInfo,
+    defaultVoiceSource,
     isLoading: defaultVoiceQuery.isLoading || healthQuery.isLoading,
     error,
     updateDefaultVoice,

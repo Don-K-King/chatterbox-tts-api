@@ -118,12 +118,7 @@ export default function TTSPage() {
     voices,
     selectedVoice,
     setSelectedVoice,
-    addVoice,
-    deleteVoice,
-    renameVoice,
     refreshVoices,
-    addAlias,
-    removeAlias,
     isLoading: voicesLoading,
     isBackendReady: voicesBackendReady,
     error: voicesError
@@ -180,6 +175,7 @@ export default function TTSPage() {
   // Default voice management with backend health monitoring
   const {
     defaultVoice,
+    defaultVoiceInfo,
     updateDefaultVoice,
     clearDefaultVoice,
     isLoading: defaultVoiceLoading,
@@ -193,6 +189,27 @@ export default function TTSPage() {
   // Create TTS service with current API base URL and session ID
   const ttsService = useMemo(() => createTTSService(apiBaseUrl, sessionId), [apiBaseUrl, sessionId]);
 
+  const resolvedDefaultVoiceName = useMemo(() => {
+    if (defaultVoice) {
+      return defaultVoice;
+    }
+    return defaultVoiceInfo?.name;
+  }, [defaultVoice, defaultVoiceInfo]);
+
+  const resolvedDefaultVoiceLanguage = useMemo(() => {
+    if (defaultVoice) {
+      const matchingVoice = voices.find(voice => voice.name === defaultVoice);
+      if (matchingVoice?.language) {
+        return matchingVoice.language;
+      }
+    }
+    return defaultVoiceInfo?.language;
+  }, [voices, defaultVoice, defaultVoiceInfo]);
+
+  const voiceNameForHistory = useMemo(() => {
+    return selectedVoice?.name || resolvedDefaultVoiceName || defaultVoice || 'Default';
+  }, [selectedVoice, resolvedDefaultVoiceName, defaultVoice]);
+
   // Status monitoring with real-time updates
   const {
     progress,
@@ -202,7 +219,7 @@ export default function TTSPage() {
     isLoadingStats
   } = useStatusMonitoring(apiBaseUrl);
 
-  const backendRequestId = progress?.request_id;
+  const backendRequestId = progress?.request_id ?? progress?.session_id;
   const isProgressProcessing = progress?.is_processing;
 
   useEffect(() => {
@@ -271,8 +288,8 @@ export default function TTSPage() {
             exaggeration,
             cfgWeight,
             temperature,
-            voiceId: selectedVoice?.id,
-            voiceName: selectedVoice?.name || defaultVoice || "Default"
+            voiceId: selectedVoice?.id || resolvedDefaultVoiceName || undefined,
+            voiceName: voiceNameForHistory
           }
         );
       } catch (error) {
@@ -296,7 +313,8 @@ export default function TTSPage() {
     // Check if we should use long text processing
     if (shouldUseLongText(text)) {
 
-      const language = selectedVoice?.language ?? 'en';
+      const voiceNameToUse = selectedVoice?.name || resolvedDefaultVoiceName;
+      const language = (selectedVoice?.language || resolvedDefaultVoiceLanguage)?.toLowerCase();
 
       setTimeout(() => {
         setIsClickedGenerating(false);
@@ -305,11 +323,11 @@ export default function TTSPage() {
       // Use long text TTS
       const longTextRequest: LongTextRequest = {
         text,
-        voice: selectedVoice?.name,
+        ...(voiceNameToUse ? { voice: voiceNameToUse } : {}),
         exaggeration,
         cfg_weight: cfgWeight,
         temperature,
-        language,
+        ...(language ? { language } : {}),
         output_format: 'mp3',
         session_id: sessionId
       };
@@ -342,14 +360,19 @@ export default function TTSPage() {
       session_id: sessionId
     };
 
-    if (selectedVoice) {
-      // Use voice name for backend voice library
-      requestData.voice = selectedVoice.name;
+    const voiceNameToUse = selectedVoice?.name || resolvedDefaultVoiceName;
+    const languageToUse = (selectedVoice?.language || resolvedDefaultVoiceLanguage)?.toLowerCase();
 
-      // Also include voice file if it's a client-side voice (for backward compatibility)
-      if (selectedVoice.file) {
-        requestData.voice_file = selectedVoice.file;
-      }
+    if (voiceNameToUse) {
+      requestData.voice = voiceNameToUse;
+    }
+
+    if (selectedVoice?.file) {
+      requestData.voice_file = selectedVoice.file;
+    }
+
+    if (languageToUse) {
+      requestData.language = languageToUse;
     }
 
     // Track this request
@@ -373,8 +396,8 @@ export default function TTSPage() {
                 exaggeration,
                 cfgWeight,
                 temperature,
-                voiceId: selectedVoice?.id,
-                voiceName: selectedVoice?.name || defaultVoice || "Default"
+                voiceId: selectedVoice?.id || resolvedDefaultVoiceName || undefined,
+                voiceName: voiceNameForHistory
               }
             );
           } catch (error) {
@@ -560,16 +583,13 @@ export default function TTSPage() {
               voices={voices}
               selectedVoice={selectedVoice}
               onVoiceSelect={setSelectedVoice}
-              onAddVoice={addVoice}
-              onDeleteVoice={deleteVoice}
-              onRenameVoice={renameVoice}
               onRefresh={refreshVoices}
               isLoading={voicesLoading}
               defaultVoice={defaultVoice}
               onSetDefaultVoice={updateDefaultVoice}
               onClearDefaultVoice={clearDefaultVoice}
-              onAddAlias={addAlias}
-              onRemoveAlias={removeAlias}
+              managerUrl="/voice-manager"
+              canManage={false}
             />
 
             {/* Voice Library Error Display */}
@@ -750,12 +770,12 @@ export default function TTSPage() {
       </div>
 
       {/* Progress Overlay */}
-      {shouldShowProgress(progress?.request_id) && progress && (
+      {shouldShowProgress(backendRequestId) && progress && (
         <StatusProgressOverlay
           progress={progress}
-          isVisible={shouldShowProgress(progress?.request_id)}
+          isVisible={shouldShowProgress(backendRequestId)}
           onDismiss={dismissProgress}
-          isLongText={isLongTextRequest(progress?.request_id)}
+          isLongText={isLongTextRequest(backendRequestId)}
         />
       )}
     </>

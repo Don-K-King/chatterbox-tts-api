@@ -22,6 +22,10 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
       formData.append('temperature', request.temperature.toString());
     }
 
+    if (request.language) {
+      formData.append('language', request.language);
+    }
+
     if (request.voice_file) {
       formData.append('voice_file', request.voice_file);
     }
@@ -152,6 +156,10 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
 
     if (request.temperature !== undefined) {
       formData.append('temperature', request.temperature.toString());
+    }
+
+    if (request.language) {
+      formData.append('language', request.language);
     }
 
     if (request.voice_file) {
@@ -310,6 +318,29 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
   getVoiceInfo: async (voiceName: string): Promise<VoiceLibraryItem> => {
     const response = await axios.get(`${baseUrl}/voices/${encodeURIComponent(voiceName)}`);
     return response.data.voice;
+  },
+
+  updateVoiceLanguage: async (voiceName: string, language: string): Promise<void> => {
+    const formData = new FormData();
+    formData.append('language', language);
+
+    const response = await fetch(`${baseUrl}/voices/${encodeURIComponent(voiceName)}/language`, {
+      method: 'PUT',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData?.error?.message || `Language update failed: ${response.status}`);
+    }
+  },
+
+  exportVoices: async (): Promise<Blob> => {
+    const response = await fetch(`${baseUrl}/voices/export`);
+    if (!response.ok) {
+      throw new Error(`Failed to export voices: ${response.status}`);
+    }
+    return response.blob();
   },
 
   // New status endpoints
