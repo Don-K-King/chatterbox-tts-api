@@ -118,12 +118,7 @@ export default function TTSPage() {
     voices,
     selectedVoice,
     setSelectedVoice,
-    addVoice,
-    deleteVoice,
-    renameVoice,
     refreshVoices,
-    addAlias,
-    removeAlias,
     isLoading: voicesLoading,
     isBackendReady: voicesBackendReady,
     error: voicesError
@@ -588,16 +583,13 @@ export default function TTSPage() {
               voices={voices}
               selectedVoice={selectedVoice}
               onVoiceSelect={setSelectedVoice}
-              onAddVoice={addVoice}
-              onDeleteVoice={deleteVoice}
-              onRenameVoice={renameVoice}
               onRefresh={refreshVoices}
               isLoading={voicesLoading}
               defaultVoice={defaultVoice}
               onSetDefaultVoice={updateDefaultVoice}
               onClearDefaultVoice={clearDefaultVoice}
-              onAddAlias={addAlias}
-              onRemoveAlias={removeAlias}
+              managerUrl="/voice-manager"
+              canManage={false}
             />
 
             {/* Voice Library Error Display */}

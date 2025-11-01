@@ -6,6 +6,7 @@ import os
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status, File, UploadFile, Form
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from app.models import ErrorResponse, SupportedLanguagesResponse, SupportedLanguageItem
 from app.core.voice_library import get_voice_library, SUPPORTED_VOICE_FORMATS
@@ -363,11 +364,21 @@ async def download_voice(voice_name: str):
         
         voice_info = voice_lib.get_voice_info(voice_name)
         filename = voice_info["filename"] if voice_info else f"{voice_name}.wav"
-        
+        file_extension = voice_info.get("file_extension", ".wav") if voice_info else ".wav"
+
+        mime_map = {
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
+            ".flac": "audio/flac",
+            ".m4a": "audio/mp4",
+            ".ogg": "audio/ogg",
+        }
+        media_type = mime_map.get(file_extension.lower(), "audio/wav")
+
         return FileResponse(
             voice_path,
             filename=filename,
-            media_type="audio/wav"
+            media_type=media_type
         )
     except HTTPException:
         raise
@@ -375,6 +386,104 @@ async def download_voice(voice_name: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": {"message": f"Failed to download voice: {str(e)}", "type": "voice_library_error"}}
+        )
+
+
+@router.put(
+    "/voices/{voice_name}/language",
+    responses={
+        200: {"description": "Voice language updated successfully"},
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse}
+    },
+    summary="Update voice language",
+    description="Update the language metadata associated with a voice"
+)
+async def update_voice_language(
+    voice_name: str,
+    language: str = Form(..., description="Language code for the voice (e.g., 'en', 'fr', 'es')", min_length=2, max_length=5)
+):
+    """Update the language associated with a voice."""
+
+    try:
+        language = language.strip().lower()
+
+        if is_multilingual():
+            supported_langs = get_supported_languages()
+            if language not in supported_langs:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": {
+                            "message": f"Unsupported language: {language}. Supported languages: {', '.join(supported_langs.keys())}",
+                            "type": "invalid_request_error"
+                        }
+                    }
+                )
+        elif language != "en":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": {
+                        "message": "Only English (en) is supported when not using multilingual model",
+                        "type": "invalid_request_error"
+                    }
+                }
+            )
+
+        voice_lib = get_voice_library()
+        updated = voice_lib.update_voice_language(voice_name, language)
+
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": {"message": f"Voice '{voice_name}' not found", "type": "voice_not_found_error"}}
+            )
+
+        voice_info = voice_lib.get_voice_info(voice_name)
+
+        return {
+            "message": "Voice language updated successfully",
+            "voice": voice_info
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": {"message": f"Failed to update voice language: {str(e)}", "type": "voice_library_error"}}
+        )
+
+
+@router.get(
+    "/voices/export",
+    responses={
+        200: {"description": "Voice library exported successfully"},
+        500: {"model": ErrorResponse}
+    },
+    summary="Export voice library",
+    description="Export all voices and metadata as a ZIP archive"
+)
+async def export_voice_library():
+    """Export the entire voice library as a ZIP archive."""
+
+    try:
+        voice_lib = get_voice_library()
+        export_path = voice_lib.export_library()
+        filename = os.path.basename(export_path)
+
+        return FileResponse(
+            export_path,
+            filename=filename,
+            media_type="application/zip",
+            background=BackgroundTask(lambda: os.remove(export_path))
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": {"message": f"Failed to export voice library: {str(e)}", "type": "voice_library_error"}}
         )
 
 

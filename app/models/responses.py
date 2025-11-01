@@ -142,11 +142,15 @@ class APIInfoResponse(BaseModel):
 
 class VoiceLibraryItem(BaseModel):
     """Voice library item response model"""
-    
+
     name: str
     filename: str
     original_filename: str
     file_extension: str
+    original_extension: Optional[str] = None
+    converted_to_wav: bool = False
+    converted_from: Optional[str] = None
+    file_hash: Optional[str] = None
     file_size: int
     upload_date: str
     path: str

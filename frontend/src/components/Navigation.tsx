@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'wouter';
-import { Volume2, MemoryStick } from 'lucide-react';
+import { Volume2, MemoryStick, AudioWaveform } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Navigation() {
@@ -18,6 +18,12 @@ export default function Navigation() {
       label: 'Memory',
       icon: MemoryStick,
       description: 'Memory Management & Monitoring'
+    },
+    {
+      path: '/voice-manager',
+      label: 'Voices',
+      icon: AudioWaveform,
+      description: 'Voice library management & testing'
     }
   ];
 
