@@ -17,7 +17,8 @@ def test_sse_streaming():
         "stream_format": "sse",
         "exaggeration": 0.7,
         "streaming_strategy": "sentence",
-        "streaming_chunk_size": 80  # Smaller chunks for more streaming events
+        "streaming_chunk_size": 80,  # Smaller chunks for more streaming events
+        "conversation_id": "stream-frontend-1",
     }
     
     headers = {
@@ -119,7 +120,8 @@ def test_multiple_chunk_streaming():
         "stream_format": "sse",
         "exaggeration": 0.8,
         "streaming_strategy": "sentence",
-        "streaming_chunk_size": 50  # Very small chunks
+        "streaming_chunk_size": 50,
+        "conversation_id": "stream-frontend-2",
     }
     
     print("🎯 Testing multiple chunk streaming...")

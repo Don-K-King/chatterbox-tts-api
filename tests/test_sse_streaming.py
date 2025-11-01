@@ -27,7 +27,8 @@ def test_sse_streaming():
         "stream_format": "sse",
         "exaggeration": 0.8,
         "streaming_strategy": "sentence",
-        "streaming_chunk_size": 150
+        "streaming_chunk_size": 150,
+        "conversation_id": "sse-stream-1",
     }
     
     print(f"📝 Text to convert: {test_text}")
@@ -132,7 +133,8 @@ def test_sse_vs_regular():
         "http://localhost:4123/v1/audio/speech",
         json={
             "input": test_text,
-            "stream_format": "audio"  # Regular audio
+            "stream_format": "audio",  # Regular audio
+            "conversation_id": "sse-stream-regular",
         }
     )
     
@@ -157,7 +159,8 @@ def test_sse_vs_regular():
         "http://localhost:4123/v1/audio/speech",
         json={
             "input": test_text,
-            "stream_format": "sse"
+            "stream_format": "sse",
+            "conversation_id": "sse-stream-compare",
         },
         stream=True
     )

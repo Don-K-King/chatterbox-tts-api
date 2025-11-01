@@ -3,13 +3,28 @@ Request models for API validation
 """
 
 from typing import Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, AliasChoices, validator
+
+
+CONVERSATION_ID_ALIASES = AliasChoices(
+    "conversation_id",
+    "conversationId",
+    "session",
+    "session_id",
+    "sessionId",
+)
 
 
 class TTSRequest(BaseModel):
     """Text-to-speech request model"""
-    
+
     input: str = Field(..., description="The text to generate audio for", min_length=1, max_length=3000)
+    conversation_id: str = Field(
+        ...,
+        description="Stable conversation identifier used for caching and prompt reuse",
+        validation_alias=CONVERSATION_ID_ALIASES,
+        serialization_alias="conversation_id",
+    )
     voice: Optional[str] = Field("alloy", description="Voice to use (ignored - uses voice sample)")
     response_format: Optional[str] = Field("wav", description="Audio format (always returns WAV)")
     speed: Optional[float] = Field(1.0, description="Speed of speech (ignored)")
@@ -31,6 +46,12 @@ class TTSRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError('Input text cannot be empty')
         return v.strip()
+
+    @validator('conversation_id')
+    def validate_conversation_id(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError('conversation_id cannot be empty')
+        return str(v).strip()
     
     @validator('stream_format')
     def validate_stream_format(cls, v):

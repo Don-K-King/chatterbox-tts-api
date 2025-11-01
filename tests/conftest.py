@@ -7,6 +7,7 @@ import sys
 import pytest
 import requests
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,6 +20,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 BASE_URL = os.getenv("CHATTERBOX_TEST_URL", "http://localhost:4123")
 TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT", "600"))
 API_HEALTH_TIMEOUT = int(os.getenv("API_HEALTH_TIMEOUT", "5"))
+SKIP_API_HEALTH_CHECK = os.getenv("CHATTERBOX_SKIP_API_HEALTH", "false").lower() == "true"
 
 # Test data
 TEST_TEXTS = {
@@ -57,6 +59,14 @@ class APIClient:
         """Make POST request"""
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         timeout = kwargs.pop('timeout', self.timeout)
+        if 'json' in kwargs and isinstance(kwargs['json'], dict):
+            payload = dict(kwargs['json'])
+            payload.setdefault('conversation_id', f"client-{uuid.uuid4().hex}")
+            kwargs['json'] = payload
+        if 'data' in kwargs and isinstance(kwargs['data'], dict):
+            data_payload = dict(kwargs['data'])
+            data_payload.setdefault('conversation_id', f"client-{uuid.uuid4().hex}")
+            kwargs['data'] = data_payload
         return requests.post(url, timeout=timeout, **kwargs)
     
     def put(self, endpoint: str, **kwargs) -> requests.Response:
@@ -98,6 +108,8 @@ def api_client():
 @pytest.fixture(scope="session", autouse=True)
 def check_api_health(api_client):
     """Ensure API is running before running tests"""
+    if SKIP_API_HEALTH_CHECK:
+        return
     if not api_client.wait_for_health():
         pytest.skip(f"API not available at {BASE_URL}. Please start the server first.")
 

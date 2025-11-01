@@ -121,7 +121,8 @@ def test_voice_library():
                 "input": f"Hello! This is a test using the uploaded voice '{TEST_VOICE_NAME}'.",
                 "voice": TEST_VOICE_NAME,
                 "exaggeration": 0.6,
-                "temperature": 0.8
+                "temperature": 0.8,
+                "conversation_id": "voice-library-usage",
             },
             timeout=60
         )
@@ -183,7 +184,8 @@ def test_voice_library():
             headers={"Content-Type": "application/json"},
             json={
                 "input": "This should fail with voice not found.",
-                "voice": "nonexistent_voice_12345"
+                "voice": "nonexistent_voice_12345",
+                "conversation_id": "voice-library-error",
             },
             timeout=30
         )

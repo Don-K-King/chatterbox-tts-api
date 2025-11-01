@@ -188,6 +188,7 @@ class LongTextProcessor:
                     audio_buffer = await generate_speech_internal(
                         text=chunk.text,
                         voice_sample_path=voice_path,
+                        conversation_id=str(job_id),
                         language_id=language_id,
                         exaggeration=metadata.parameters.get('exaggeration'),
                         cfg_weight=metadata.parameters.get('cfg_weight'),

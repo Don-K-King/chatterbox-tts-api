@@ -1,19 +1,31 @@
-"""
-Text-to-speech endpoint
-"""
+"""Text-to-speech endpoint"""
 
 import io
 import os
 import asyncio
 import tempfile
+import logging
+from uuid import uuid4
 import torch
 import torchaudio as ta
 import base64
 import json
 import struct
 from typing import Optional, List, Dict, Any, AsyncGenerator
-from fastapi import APIRouter, HTTPException, status, Form, File, UploadFile
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    status,
+    Form,
+    File,
+    UploadFile,
+    Header,
+    Depends,
+    Body,
+)
 from fastapi.responses import StreamingResponse
+from fastapi import Request
+from pydantic import ValidationError
 
 from app.models import TTSRequest, ErrorResponse, SSEAudioDelta, SSEAudioDone, SSEUsageInfo, SSEAudioInfo
 from app.config import Config
@@ -24,6 +36,14 @@ from app.core import (
 )
 from app.core.tts_model import get_model, is_multilingual
 from app.core.text_processing import split_text_for_streaming, get_streaming_settings
+from app.core.tts_cache import (
+    get_or_load_voice_prompt,
+    invalidate_voice_prompt,
+    get_conversation_state,
+    ensure_slot,
+    get_cached_audio,
+    store_audio,
+)
 
 # Create router with aliasing support
 base_router = APIRouter()
@@ -35,6 +55,162 @@ REQUEST_COUNTER = 0
 # Supported audio formats for voice uploads
 SUPPORTED_AUDIO_FORMATS = {'.mp3', '.wav', '.flac', '.m4a', '.ogg'}
 
+
+async def ensure_wav_voice_sample(path: str) -> str:
+    """Ensure the provided voice sample is available as a WAV file.
+
+    Uploaded voice samples can arrive in a variety of formats. The
+    underlying TTS model expects WAV prompts, so we convert any
+    non-WAV uploads to WAV before caching/processing. The conversion
+    happens in a thread to avoid blocking the event loop.
+
+    Args:
+        path: Path to the uploaded voice sample.
+
+    Returns:
+        Path to a WAV file representing the same audio content.
+
+    Raises:
+        HTTPException: If the conversion fails.
+    """
+
+    _, ext = os.path.splitext(path)
+    if ext.lower() == ".wav":
+        return path
+
+    wav_path = os.path.splitext(path)[0] + ".wav"
+
+    def _convert_to_wav() -> str:
+        waveform, sample_rate = ta.load(path)
+        ta.save(wav_path, waveform, sample_rate, format="wav")
+        return wav_path
+
+    try:
+        wav_path = await asyncio.to_thread(_convert_to_wav)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error("Failed to convert voice sample %s to WAV: %s", path, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": f"Failed to convert voice sample to WAV: {exc}",
+                    "type": "invalid_request_error",
+                }
+            },
+        ) from exc
+
+    await invalidate_voice_prompt(path)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:  # pragma: no cover - best effort cleanup
+        pass
+
+    logger.info("Converted voice sample %s to WAV at %s", path, wav_path)
+    return wav_path
+
+
+try:
+    from prometheus_client import Counter as PrometheusCounter
+except Exception:  # pragma: no cover - optional dependency safety
+    class PrometheusCounter:  # type: ignore
+        def __init__(self, *_, **__):
+            pass
+
+        def inc(self, amount: int | float = 1) -> None:  # noqa: D401 - simple no-op
+            return None
+
+
+MISSING_CONVERSATION_ID_COUNTER = PrometheusCounter(
+    "tts_missing_conversation_id_total",
+    "Number of requests received without a conversation identifier",
+)
+
+logger = logging.getLogger(__name__)
+
+CONVERSATION_ID_FIELDS = (
+    "conversation_id",
+    "conversationId",
+    "session",
+    "session_id",
+    "sessionId",
+)
+
+
+def _normalize_conversation_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        candidate = value.strip()
+    else:
+        candidate = str(value).strip()
+    return candidate or None
+
+
+def _extract_conversation_id(payload: Dict[str, Any]) -> Optional[str]:
+    for field in CONVERSATION_ID_FIELDS:
+        if field in payload and payload[field] is not None:
+            candidate = _normalize_conversation_id(payload[field])
+            if candidate:
+                payload["conversation_id"] = candidate
+                return candidate
+    return None
+
+
+def _resolve_conversation_id(
+    body_value: Optional[str],
+    header_value: Optional[str],
+    allow_missing: bool,
+) -> str:
+    conversation_id = _normalize_conversation_id(body_value) or _normalize_conversation_id(header_value)
+    if conversation_id:
+        return conversation_id
+
+    MISSING_CONVERSATION_ID_COUNTER.inc()
+    if allow_missing:
+        fallback = f"fallback-{uuid4().hex}"
+        logger.warning("Missing conversation_id; using fallback %s", fallback)
+        return fallback
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error": {
+                "message": "conversation_id is required via JSON field or X-Conversation-ID header",
+                "type": "invalid_request_error",
+            }
+        },
+    )
+
+
+async def parse_tts_request(
+    payload: Dict[str, Any] = Body(...),
+    conversation_id_header: Optional[str] = Header(None, alias="X-Conversation-ID"),
+) -> TTSRequest:
+    """Parse a TTS request while honouring header-based conversation identifiers."""
+
+    payload = dict(payload or {})
+    conversation_id = _extract_conversation_id(payload)
+    if not conversation_id and conversation_id_header:
+        payload["conversation_id"] = conversation_id_header
+
+    try:
+        return TTSRequest.model_validate(payload)
+    except ValidationError as exc:
+        missing_conversation = any("conversation_id" in err.get("loc", []) for err in exc.errors())
+        if missing_conversation:
+            conversation_id = _resolve_conversation_id(None, conversation_id_header, Config.ALLOW_MISSING_CONVERSATION_ID)
+            payload["conversation_id"] = conversation_id
+            return TTSRequest.model_validate(payload)
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": exc.errors(),
+                    "type": "validation_error",
+                }
+            },
+        )
 
 def create_wav_header(sample_rate: int, channels: int, bits_per_sample: int, data_size: int = 0xFFFFFFFF) -> bytes:
     """Creates a WAV header for streaming."""
@@ -141,9 +317,24 @@ def validate_audio_file(file: UploadFile) -> None:
         )
 
 
+def resolve_conversation_id_from_form(
+    conversation_id_header: Optional[str],
+    *form_values: Optional[str],
+) -> str:
+    body_value = None
+    for value in form_values:
+        candidate = _normalize_conversation_id(value)
+        if candidate:
+            body_value = candidate
+            break
+
+    return _resolve_conversation_id(body_value, conversation_id_header, Config.ALLOW_MISSING_CONVERSATION_ID)
+
+
 async def generate_speech_internal(
     text: str,
     voice_sample_path: str,
+    conversation_id: str,
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
@@ -203,163 +394,179 @@ async def generate_speech_internal(
             }
         )
 
-    audio_chunks = []
-    final_audio = None
-    buffer = None
-    
-    try:
-        # Get parameters with defaults
-        exaggeration = exaggeration if exaggeration is not None else Config.EXAGGERATION
-        cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
-        temperature = temperature if temperature is not None else Config.TEMPERATURE
-        
-        # Split text into chunks
-        update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text into chunks")
-        chunks = split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)
-        
-        voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
-        print(f"Processing {len(chunks)} text chunks with {voice_source} and parameters:")
-        print(f"  - Exaggeration: {exaggeration}")
-        print(f"  - CFG Weight: {cfg_weight}")
-        print(f"  - Temperature: {temperature}")
-        
-        # Update status with chunk information
-        update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, "Starting audio generation", 
-                        current_chunk=0, total_chunks=len(chunks))
-        
-        # Generate audio for each chunk with memory management
-        loop = asyncio.get_event_loop()
-        
-        for i, chunk in enumerate(chunks):
-            # Update progress
-            current_step = f"Generating audio for chunk {i+1}/{len(chunks)}"
-            update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, current_step, 
-                            current_chunk=i+1, total_chunks=len(chunks))
-            
-            print(f"Generating audio for chunk {i+1}/{len(chunks)}: '{chunk[:50]}{'...' if len(chunk) > 50 else ''}'")
-            
-            # Use torch.no_grad() to prevent gradient accumulation
-            with torch.no_grad():
-                # Run TTS generation in executor to avoid blocking
-                # Prepare generation kwargs
-                generate_kwargs = {
-                    "text": chunk,
-                    "audio_prompt_path": voice_sample_path,
-                    "exaggeration": exaggeration,
-                    "cfg_weight": cfg_weight,
-                    "temperature": temperature
-                }
-                
-                # Add language_id for multilingual models
-                if is_multilingual():
-                    generate_kwargs["language_id"] = language_id
-                
-                audio_tensor = await loop.run_in_executor(
-                    None,
-                    lambda: model.generate(**generate_kwargs)
-                )
-                
-                # Ensure tensor is on the correct device and detached
-                if hasattr(audio_tensor, 'detach'):
-                    audio_tensor = audio_tensor.detach()
-                
-                audio_chunks.append(audio_tensor)
-            
-            # Periodic memory cleanup during generation
-            if i > 0 and i % 3 == 0:  # Every 3 chunks
-                import gc
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-        
-        # Concatenate all chunks with memory management
-        if len(audio_chunks) > 1:
-            update_tts_status(request_id, TTSStatus.CONCATENATING, "Concatenating audio chunks")
-            print("Concatenating audio chunks...")
-            with torch.no_grad():
-                final_audio = concatenate_audio_chunks(audio_chunks, model.sr)
-        else:
-            final_audio = audio_chunks[0]
-        
-        # Convert to WAV format
-        update_tts_status(request_id, TTSStatus.FINALIZING, "Converting to WAV format")
-        buffer = io.BytesIO()
-        
-        # Ensure final_audio is on CPU for saving
-        if hasattr(final_audio, 'cpu'):
-            final_audio_cpu = final_audio.cpu()
-        else:
-            final_audio_cpu = final_audio
-            
-        ta.save(buffer, final_audio_cpu, model.sr, format="wav")
-        buffer.seek(0)
-        
-        # Mark as completed
-        update_tts_status(request_id, TTSStatus.COMPLETED, "Audio generation completed")
-        print(f"✓ Audio generation completed. Size: {len(buffer.getvalue()):,} bytes")
-        
-        return buffer
-        
-    except Exception as e:
-        # Update status with error
-        update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS generation failed: {str(e)}")
-        print(f"✗ TTS generation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": {
-                    "message": f"TTS generation failed: {str(e)}",
-                    "type": "generation_error"
-                }
-            }
-        )
-    
-    finally:
-        # Comprehensive cleanup
+    voice_prompt = await get_or_load_voice_prompt(voice_sample_path)
+    conversation_state = await get_conversation_state(conversation_id)
+
+    async with conversation_state.lock:
+        slot, slot_name, _ = ensure_slot(conversation_state, voice_prompt, language_id)
+        cached_audio = get_cached_audio(conversation_id, slot, text, language_id)
+        if cached_audio is not None:
+            update_tts_status(request_id, TTSStatus.COMPLETED, "Returned cached audio")
+            logger.info(
+                "Conversation %s served cached audio from slot %s", conversation_id, slot_name
+            )
+            buffer = io.BytesIO(cached_audio)
+            buffer.seek(0)
+            return buffer
+
+        audio_chunks: List[Any] = []
+        final_audio = None
+
         try:
-            # Clean up all audio chunks
-            for chunk in audio_chunks:
-                safe_delete_tensors(chunk)
-            
-            # Clean up final audio tensor
-            if final_audio is not None:
-                safe_delete_tensors(final_audio)
-                if 'final_audio_cpu' in locals():
-                    safe_delete_tensors(final_audio_cpu)
-            
-            # Clear the list
-            audio_chunks.clear()
-            
-            # Periodic memory cleanup
-            if REQUEST_COUNTER % Config.MEMORY_CLEANUP_INTERVAL == 0:
-                cleanup_memory()
-            
-            # Log memory usage after processing
-            if Config.ENABLE_MEMORY_MONITORING:
-                final_memory = get_memory_info()
-                print(f"📊 Request #{REQUEST_COUNTER} - Final memory: CPU {final_memory['cpu_memory_mb']:.1f}MB", end="")
-                if torch.cuda.is_available():
-                    print(f", GPU {final_memory['gpu_memory_allocated_mb']:.1f}MB allocated")
-                else:
-                    print()
-                
-                # Calculate memory difference
-                if 'initial_memory' in locals():
-                    cpu_diff = final_memory['cpu_memory_mb'] - initial_memory['cpu_memory_mb']
-                    print(f"📈 Memory change: CPU {cpu_diff:+.1f}MB", end="")
+            # Get parameters with defaults
+            exaggeration = exaggeration if exaggeration is not None else Config.EXAGGERATION
+            cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
+            temperature = temperature if temperature is not None else Config.TEMPERATURE
+
+            # Split text into chunks
+            update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text into chunks")
+            chunks = split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)
+
+            voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
+            print(f"Processing {len(chunks)} text chunks with {voice_source} and parameters:")
+            print(f"  - Exaggeration: {exaggeration}")
+            print(f"  - CFG Weight: {cfg_weight}")
+            print(f"  - Temperature: {temperature}")
+
+            # Update status with chunk information
+            update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, "Starting audio generation",
+                            current_chunk=0, total_chunks=len(chunks))
+
+            # Generate audio for each chunk with memory management
+            loop = asyncio.get_event_loop()
+
+            for i, chunk in enumerate(chunks):
+                # Update progress
+                current_step = f"Generating audio for chunk {i+1}/{len(chunks)}"
+                update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, current_step,
+                                current_chunk=i+1, total_chunks=len(chunks))
+
+                print(f"Generating audio for chunk {i+1}/{len(chunks)}: '{chunk[:50]}{'...' if len(chunk) > 50 else ''}'")
+
+                # Use torch.no_grad() to prevent gradient accumulation
+                with torch.no_grad():
+                    # Run TTS generation in executor to avoid blocking
+                    generate_kwargs = {
+                        "text": chunk,
+                        "audio_prompt_path": voice_sample_path,
+                        "exaggeration": exaggeration,
+                        "cfg_weight": cfg_weight,
+                        "temperature": temperature
+                    }
+
+                    # Add language_id for multilingual models
+                    if is_multilingual():
+                        generate_kwargs["language_id"] = language_id
+
+                    audio_tensor = await loop.run_in_executor(
+                        None,
+                        lambda: model.generate(**generate_kwargs)
+                    )
+
+                    # Ensure tensor is on the correct device and detached
+                    if hasattr(audio_tensor, 'detach'):
+                        audio_tensor = audio_tensor.detach()
+
+                    audio_chunks.append(audio_tensor)
+
+                # Periodic memory cleanup during generation
+                if i > 0 and i % 3 == 0:  # Every 3 chunks
+                    import gc
+                    gc.collect()
                     if torch.cuda.is_available():
-                        gpu_diff = final_memory['gpu_memory_allocated_mb'] - initial_memory['gpu_memory_allocated_mb']
-                        print(f", GPU {gpu_diff:+.1f}MB")
+                        torch.cuda.empty_cache()
+
+            # Concatenate all chunks with memory management
+            if len(audio_chunks) > 1:
+                update_tts_status(request_id, TTSStatus.CONCATENATING, "Concatenating audio chunks")
+                print("Concatenating audio chunks...")
+                with torch.no_grad():
+                    final_audio = concatenate_audio_chunks(audio_chunks, model.sr)
+            else:
+                final_audio = audio_chunks[0]
+
+            # Convert to WAV format
+            update_tts_status(request_id, TTSStatus.FINALIZING, "Converting to WAV format")
+            buffer = io.BytesIO()
+
+            # Ensure final_audio is on CPU for saving
+            if hasattr(final_audio, 'cpu'):
+                final_audio_cpu = final_audio.cpu()
+            else:
+                final_audio_cpu = final_audio
+
+            ta.save(buffer, final_audio_cpu, model.sr, format="wav")
+            buffer.seek(0)
+            audio_bytes = buffer.getvalue()
+            store_audio(conversation_id, slot, text, language_id, audio_bytes)
+
+            # Mark as completed
+            update_tts_status(request_id, TTSStatus.COMPLETED, "Audio generation completed")
+            print(f"✓ Audio generation completed. Size: {len(audio_bytes):,} bytes")
+
+            return io.BytesIO(audio_bytes)
+
+        except Exception as e:
+            # Update status with error
+            update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS generation failed: {str(e)}")
+            print(f"✗ TTS generation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": {
+                        "message": f"TTS generation failed: {str(e)}",
+                        "type": "generation_error"
+                    }
+                }
+            )
+
+        finally:
+            # Comprehensive cleanup
+            try:
+                # Clean up all audio chunks
+                for chunk in audio_chunks:
+                    safe_delete_tensors(chunk)
+
+                # Clean up final audio tensor
+                if final_audio is not None:
+                    safe_delete_tensors(final_audio)
+                    if 'final_audio_cpu' in locals():
+                        safe_delete_tensors(final_audio_cpu)
+
+                # Clear the list
+                audio_chunks.clear()
+
+                # Periodic memory cleanup
+                if REQUEST_COUNTER % Config.MEMORY_CLEANUP_INTERVAL == 0:
+                    cleanup_memory()
+
+                # Log memory usage after processing
+                if Config.ENABLE_MEMORY_MONITORING:
+                    final_memory = get_memory_info()
+                    print(f"📊 Request #{REQUEST_COUNTER} - Final memory: CPU {final_memory['cpu_memory_mb']:.1f}MB", end="")
+                    if torch.cuda.is_available():
+                        print(f", GPU {final_memory['gpu_memory_allocated_mb']:.1f}MB allocated")
                     else:
                         print()
-            
-        except Exception as cleanup_error:
-            print(f"⚠️ Warning during cleanup: {cleanup_error}")
+
+                    # Calculate memory difference
+                    if 'initial_memory' in locals():
+                        cpu_diff = final_memory['cpu_memory_mb'] - initial_memory['cpu_memory_mb']
+                        print(f"📈 Memory change: CPU {cpu_diff:+.1f}MB", end="")
+                        if torch.cuda.is_available():
+                            gpu_diff = final_memory['gpu_memory_allocated_mb'] - initial_memory['gpu_memory_allocated_mb']
+                            print(f", GPU {gpu_diff:+.1f}MB")
+                        else:
+                            print()
+
+            except Exception as cleanup_error:
+                print(f"⚠️ Warning during cleanup: {cleanup_error}")
 
 
 async def generate_speech_streaming(
     text: str,
     voice_sample_path: str,
+    conversation_id: str,
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
@@ -426,106 +633,111 @@ async def generate_speech_streaming(
             }
         )
 
-    # WAV header info for streaming
-    sample_rate = model.sr
-    channels = 1
-    bits_per_sample = 16
-    
-    # Generate and yield WAV header first
     try:
-        # Get parameters with defaults
-        exaggeration = exaggeration if exaggeration is not None else Config.EXAGGERATION
-        cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
-        temperature = temperature if temperature is not None else Config.TEMPERATURE
-        
-        # Get optimized streaming settings
-        streaming_settings = get_streaming_settings(
-            streaming_chunk_size, streaming_strategy, streaming_quality
-        )
-        
-        # Split text using streaming-optimized chunking
-        update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text for streaming")
-        chunks = split_text_for_streaming(
-            text, 
-            chunk_size=streaming_settings["chunk_size"],
-            strategy=streaming_settings["strategy"],
-            quality=streaming_settings["quality"]
-        )
-        
-        voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
-        print(f"Streaming {len(chunks)} text chunks with {voice_source} and parameters:")
-        print(f"  - Exaggeration: {exaggeration}")
-        print(f"  - CFG Weight: {cfg_weight}")
-        print(f"  - Temperature: {temperature}")
-        print(f"  - Streaming Strategy: {streaming_settings['strategy']}")
-        print(f"  - Streaming Chunk Size: {streaming_settings['chunk_size']}")
-        print(f"  - Streaming Quality: {streaming_settings['quality']}")
-        
-        # Update status with chunk information
-        update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, "Starting streaming audio generation", 
-                        current_chunk=0, total_chunks=len(chunks))
-        
-        # Yield a proper WAV header for streaming
-        wav_header = create_wav_header(sample_rate, channels, bits_per_sample)
-        yield wav_header
-        
-        # Generate and stream audio for each chunk
-        loop = asyncio.get_event_loop()
-        total_samples = 0
-        
-        for i, chunk in enumerate(chunks):
-            # Update progress
-            current_step = f"Streaming audio for chunk {i+1}/{len(chunks)} ({streaming_settings['strategy']} strategy)"
-            update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, current_step, 
-                            current_chunk=i+1, total_chunks=len(chunks))
-            
-            print(f"Streaming audio for chunk {i+1}/{len(chunks)}: '{chunk[:50]}{'...' if len(chunk) > 50 else ''}'")
-            
-            # Use torch.no_grad() to prevent gradient accumulation
-            with torch.no_grad():
-                # Run TTS generation in executor to avoid blocking
-                audio_tensor = await loop.run_in_executor(
-                    None,
-                    lambda: model.generate(
-                        text=chunk,
-                        audio_prompt_path=voice_sample_path,
-                        exaggeration=exaggeration,
-                        cfg_weight=cfg_weight,
-                        temperature=temperature,
-                        **({'language_id': language_id} if is_multilingual() else {})
-                    )
-                )
-                
-                # Ensure tensor is on CPU for streaming
-                if hasattr(audio_tensor, 'cpu'):
-                    audio_tensor = audio_tensor.cpu()
+        voice_prompt = await get_or_load_voice_prompt(voice_sample_path)
+        conversation_state = await get_conversation_state(conversation_id)
 
-                # Convert tensor to raw 16-bit PCM data
-                # Clamp values to [-1, 1] before conversion
-                audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
-                audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
-                
-                # Yield the raw audio data as bytes
-                pcm_data = audio_tensor_int.numpy().tobytes()
-                yield pcm_data
-                
-                total_samples += audio_tensor.shape[1]
-                
-                # Clean up this chunk
-                safe_delete_tensors(audio_tensor, audio_tensor_int)
-                del pcm_data
-            
-            # Periodic memory cleanup during generation
-            if i > 0 and i % 3 == 0:  # Every 3 chunks
-                import gc
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-        
-        # Mark as completed
-        update_tts_status(request_id, TTSStatus.COMPLETED, "Streaming audio generation completed")
-        print(f"✓ Streaming audio generation completed. Total samples: {total_samples:,}")
-        
+        async with conversation_state.lock:
+            ensure_slot(conversation_state, voice_prompt, language_id)
+
+            # WAV header info for streaming
+            sample_rate = model.sr
+            channels = 1
+            bits_per_sample = 16
+
+            # Generate and yield WAV header first
+            # Get parameters with defaults
+            exaggeration = exaggeration if exaggeration is not None else Config.EXAGGERATION
+            cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
+            temperature = temperature if temperature is not None else Config.TEMPERATURE
+
+            # Get optimized streaming settings
+            streaming_settings = get_streaming_settings(
+                streaming_chunk_size, streaming_strategy, streaming_quality
+            )
+
+            # Split text using streaming-optimized chunking
+            update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text for streaming")
+            chunks = split_text_for_streaming(
+                text,
+                chunk_size=streaming_settings["chunk_size"],
+                strategy=streaming_settings["strategy"],
+                quality=streaming_settings["quality"]
+            )
+
+            voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
+            print(f"Streaming {len(chunks)} text chunks with {voice_source} and parameters:")
+            print(f"  - Exaggeration: {exaggeration}")
+            print(f"  - CFG Weight: {cfg_weight}")
+            print(f"  - Temperature: {temperature}")
+            print(f"  - Streaming Strategy: {streaming_settings['strategy']}")
+            print(f"  - Streaming Chunk Size: {streaming_settings['chunk_size']}")
+            print(f"  - Streaming Quality: {streaming_settings['quality']}")
+
+            # Update status with chunk information
+            update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, "Starting streaming audio generation",
+                            current_chunk=0, total_chunks=len(chunks))
+
+            # Yield a proper WAV header for streaming
+            wav_header = create_wav_header(sample_rate, channels, bits_per_sample)
+            yield wav_header
+
+            # Generate and stream audio for each chunk
+            loop = asyncio.get_event_loop()
+            total_samples = 0
+
+            for i, chunk in enumerate(chunks):
+                # Update progress
+                current_step = f"Streaming audio for chunk {i+1}/{len(chunks)} ({streaming_settings['strategy']} strategy)"
+                update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, current_step,
+                                current_chunk=i+1, total_chunks=len(chunks))
+
+                print(f"Streaming audio for chunk {i+1}/{len(chunks)}: '{chunk[:50]}{'...' if len(chunk) > 50 else ''}'")
+
+                # Use torch.no_grad() to prevent gradient accumulation
+                with torch.no_grad():
+                    # Run TTS generation in executor to avoid blocking
+                    audio_tensor = await loop.run_in_executor(
+                        None,
+                        lambda: model.generate(
+                            text=chunk,
+                            audio_prompt_path=voice_sample_path,
+                            exaggeration=exaggeration,
+                            cfg_weight=cfg_weight,
+                            temperature=temperature,
+                            **({'language_id': language_id} if is_multilingual() else {})
+                        )
+                    )
+
+                    # Ensure tensor is on CPU for streaming
+                    if hasattr(audio_tensor, 'cpu'):
+                        audio_tensor = audio_tensor.cpu()
+
+                    # Convert tensor to raw 16-bit PCM data
+                    # Clamp values to [-1, 1] before conversion
+                    audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
+                    audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
+
+                    # Yield the raw audio data as bytes
+                    pcm_data = audio_tensor_int.numpy().tobytes()
+                    yield pcm_data
+
+                    total_samples += audio_tensor.shape[1]
+
+                    # Clean up this chunk
+                    safe_delete_tensors(audio_tensor, audio_tensor_int)
+                    del pcm_data
+
+                # Periodic memory cleanup during generation
+                if i > 0 and i % 3 == 0:  # Every 3 chunks
+                    import gc
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+            update_tts_status(request_id, TTSStatus.COMPLETED, "Streaming audio generation completed")
+            print(f"✓ Streaming audio generation completed. Total samples: {total_samples:,}")
+
     except Exception as e:
         # Update status with error
         update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS streaming failed: {str(e)}")
@@ -539,7 +751,7 @@ async def generate_speech_streaming(
                 }
             }
         )
-    
+
     finally:
         # Periodic memory cleanup
         if REQUEST_COUNTER % Config.MEMORY_CLEANUP_INTERVAL == 0:
@@ -558,6 +770,7 @@ async def generate_speech_streaming(
 async def generate_speech_sse(
     text: str,
     voice_sample_path: str,
+    conversation_id: str,
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
@@ -625,131 +838,137 @@ async def generate_speech_sse(
             }
         )
 
-    # WAV header info for conversion
-    sample_rate = model.sr
-    channels = 1
-    bits_per_sample = 16
-    total_audio_chunks = 0
-    total_input_tokens = len(text.split())  # Rough token count
-    
     try:
-        # Get parameters with defaults
-        exaggeration = exaggeration if exaggeration is not None else Config.EXAGGERATION
-        cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
-        temperature = temperature if temperature is not None else Config.TEMPERATURE
-        
-        # Get optimized streaming settings
-        streaming_settings = get_streaming_settings(
-            streaming_chunk_size, streaming_strategy, streaming_quality
-        )
-        
-        # Split text using streaming-optimized chunking
-        update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text for SSE streaming")
-        chunks = split_text_for_streaming(
-            text, 
-            chunk_size=streaming_settings["chunk_size"],
-            strategy=streaming_settings["strategy"],
-            quality=streaming_settings["quality"]
-        )
-        
-        voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
-        print(f"SSE Streaming {len(chunks)} text chunks with {voice_source} and parameters:")
-        print(f"  - Exaggeration: {exaggeration}")
-        print(f"  - CFG Weight: {cfg_weight}")
-        print(f"  - Temperature: {temperature}")
-        print(f"  - Streaming Strategy: {streaming_settings['strategy']}")
-        print(f"  - Streaming Chunk Size: {streaming_settings['chunk_size']}")
-        print(f"  - Streaming Quality: {streaming_settings['quality']}")
-        
-        # Update status with chunk information
-        update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, "Starting SSE audio generation", 
-                        current_chunk=0, total_chunks=len(chunks))
-        
-        # First, send an info event with audio parameters
-        info_event = SSEAudioInfo(
-            sample_rate=sample_rate,
-            channels=channels,
-            bits_per_sample=bits_per_sample
-        )
-        yield f"data: {info_event.model_dump_json()}\n\n"
-        
-        # Generate and stream audio for each chunk as SSE events
-        loop = asyncio.get_event_loop()
-        
-        for i, chunk in enumerate(chunks):
-            # Update progress
-            current_step = f"SSE streaming audio for chunk {i+1}/{len(chunks)} ({streaming_settings['strategy']} strategy)"
-            update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, current_step, 
-                            current_chunk=i+1, total_chunks=len(chunks))
-            
-            print(f"SSE streaming audio for chunk {i+1}/{len(chunks)}: '{chunk[:50]}{'...' if len(chunk) > 50 else ''}'")
-            
-            # Use torch.no_grad() to prevent gradient accumulation
-            with torch.no_grad():
-                # Run TTS generation in executor to avoid blocking
-                audio_tensor = await loop.run_in_executor(
-                    None,
-                    lambda: model.generate(
-                        text=chunk,
-                        audio_prompt_path=voice_sample_path,
-                        exaggeration=exaggeration,
-                        cfg_weight=cfg_weight,
-                        temperature=temperature,
-                        **({'language_id': language_id} if is_multilingual() else {})
-                    )
-                )
-                
-                # Ensure tensor is on CPU for processing
-                if hasattr(audio_tensor, 'cpu'):
-                    audio_tensor = audio_tensor.cpu()
+        voice_prompt = await get_or_load_voice_prompt(voice_sample_path)
+        conversation_state = await get_conversation_state(conversation_id)
 
-                # Convert tensor to raw 16-bit PCM data
-                audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
-                audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
-                pcm_data = audio_tensor_int.numpy().tobytes()
-                
-                # Base64 encode the raw PCM data
-                audio_base64 = base64.b64encode(pcm_data).decode('utf-8')
-                
-                # Create SSE event for this audio chunk
-                sse_event = SSEAudioDelta(audio=audio_base64)
-                
-                # Format as SSE event
-                sse_data = f"data: {sse_event.model_dump_json()}\n\n"
-                yield sse_data
-                
-                total_audio_chunks += 1
-                
-                # Clean up this chunk
-                safe_delete_tensors(audio_tensor, audio_tensor_int)
-                del pcm_data
-            
-            # Periodic memory cleanup during generation
-            if i > 0 and i % 3 == 0:  # Every 3 chunks
-                import gc
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-        
-        # Send completion event
-        total_output_tokens = total_audio_chunks * 50  # Rough estimate
-        total_tokens = total_input_tokens + total_output_tokens
-        
-        usage_info = SSEUsageInfo(
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            total_tokens=total_tokens
-        )
-        completion_event = SSEAudioDone(usage=usage_info)
-        
-        # Format final SSE event
-        final_sse_data = f"data: {completion_event.model_dump_json()}\n\n"
-        yield final_sse_data
-        
-        # Mark as completed
-        update_tts_status(request_id, TTSStatus.COMPLETED, "SSE audio generation completed")
-        print(f"✓ SSE audio generation completed. Total chunks: {total_audio_chunks}")
-        
+        async with conversation_state.lock:
+            ensure_slot(conversation_state, voice_prompt, language_id)
+
+            # WAV header info for conversion
+            sample_rate = model.sr
+            channels = 1
+            bits_per_sample = 16
+            total_audio_chunks = 0
+            total_input_tokens = len(text.split())  # Rough token count
+
+            # Get parameters with defaults
+            exaggeration = exaggeration if exaggeration is not None else Config.EXAGGERATION
+            cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
+            temperature = temperature if temperature is not None else Config.TEMPERATURE
+
+            # Get optimized streaming settings
+            streaming_settings = get_streaming_settings(
+                streaming_chunk_size, streaming_strategy, streaming_quality
+            )
+
+            # Split text using streaming-optimized chunking
+            update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text for SSE streaming")
+            chunks = split_text_for_streaming(
+                text,
+                chunk_size=streaming_settings["chunk_size"],
+                strategy=streaming_settings["strategy"],
+                quality=streaming_settings["quality"]
+            )
+
+            voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
+            print(f"SSE Streaming {len(chunks)} text chunks with {voice_source} and parameters:")
+            print(f"  - Exaggeration: {exaggeration}")
+            print(f"  - CFG Weight: {cfg_weight}")
+            print(f"  - Temperature: {temperature}")
+            print(f"  - Streaming Strategy: {streaming_settings['strategy']}")
+            print(f"  - Streaming Chunk Size: {streaming_settings['chunk_size']}")
+            print(f"  - Streaming Quality: {streaming_settings['quality']}")
+
+            # Update status with chunk information
+            update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, "Starting SSE audio generation",
+                            current_chunk=0, total_chunks=len(chunks))
+
+            # First, send an info event with audio parameters
+            info_event = SSEAudioInfo(
+                sample_rate=sample_rate,
+                channels=channels,
+                bits_per_sample=bits_per_sample
+            )
+            yield f"data: {info_event.model_dump_json()}\n\n"
+
+            # Generate and stream audio for each chunk as SSE events
+            loop = asyncio.get_event_loop()
+
+            for i, chunk in enumerate(chunks):
+                # Update progress
+                current_step = f"SSE streaming audio for chunk {i+1}/{len(chunks)} ({streaming_settings['strategy']} strategy)"
+                update_tts_status(request_id, TTSStatus.GENERATING_AUDIO, current_step,
+                                current_chunk=i+1, total_chunks=len(chunks))
+
+                print(f"SSE streaming audio for chunk {i+1}/{len(chunks)}: '{chunk[:50]}{'...' if len(chunk) > 50 else ''}'")
+
+                # Use torch.no_grad() to prevent gradient accumulation
+                with torch.no_grad():
+                    # Run TTS generation in executor to avoid blocking
+                    audio_tensor = await loop.run_in_executor(
+                        None,
+                        lambda: model.generate(
+                            text=chunk,
+                            audio_prompt_path=voice_sample_path,
+                            exaggeration=exaggeration,
+                            cfg_weight=cfg_weight,
+                            temperature=temperature,
+                            **({'language_id': language_id} if is_multilingual() else {})
+                        )
+                    )
+
+                    # Ensure tensor is on CPU for processing
+                    if hasattr(audio_tensor, 'cpu'):
+                        audio_tensor = audio_tensor.cpu()
+
+                    # Convert tensor to raw 16-bit PCM data
+                    audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
+                    audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
+                    pcm_data = audio_tensor_int.numpy().tobytes()
+
+                    # Base64 encode the raw PCM data
+                    audio_base64 = base64.b64encode(pcm_data).decode('utf-8')
+
+                    # Create SSE event for this audio chunk
+                    sse_event = SSEAudioDelta(audio=audio_base64)
+
+                    # Format as SSE event
+                    sse_data = f"data: {sse_event.model_dump_json()}\n\n"
+                    yield sse_data
+
+                    total_audio_chunks += 1
+
+                    # Clean up this chunk
+                    safe_delete_tensors(audio_tensor, audio_tensor_int)
+                    del pcm_data
+
+                # Periodic memory cleanup during generation
+                if i > 0 and i % 3 == 0:  # Every 3 chunks
+                    import gc
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+            # Send completion event
+            total_output_tokens = total_audio_chunks * 50  # Rough estimate
+            total_tokens = total_input_tokens + total_output_tokens
+
+            usage_info = SSEUsageInfo(
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                total_tokens=total_tokens
+            )
+            completion_event = SSEAudioDone(usage=usage_info)
+
+            # Format final SSE event
+            final_sse_data = f"data: {completion_event.model_dump_json()}\n\n"
+            yield final_sse_data
+
+            # Mark as completed
+            update_tts_status(request_id, TTSStatus.COMPLETED, "SSE audio generation completed")
+            print(f"✓ SSE audio generation completed. Total chunks: {total_audio_chunks}")
+
     except Exception as e:
         # Update status with error
         update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS SSE streaming failed: {str(e)}")
@@ -763,12 +982,12 @@ async def generate_speech_sse(
                 }
             }
         )
-    
+
     finally:
         # Periodic memory cleanup
         if REQUEST_COUNTER % Config.MEMORY_CLEANUP_INTERVAL == 0:
             cleanup_memory()
-        
+
         # Log memory usage after processing
         if Config.ENABLE_MEMORY_MONITORING:
             final_memory = get_memory_info()
@@ -791,7 +1010,7 @@ async def generate_speech_sse(
     summary="Generate speech from text",
     description="Generate speech audio from input text. Supports voice names from the voice library or defaults to configured voice sample. Use stream_format='sse' for Server-Side Events streaming."
 )
-async def text_to_speech(request: TTSRequest):
+async def text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
     """Generate speech from text using Chatterbox TTS with voice selection support"""
     
     # Resolve voice name to file path and language
@@ -804,6 +1023,7 @@ async def text_to_speech(request: TTSRequest):
             generate_speech_sse(
                 text=request.input,
                 voice_sample_path=voice_sample_path,
+                conversation_id=request.conversation_id,
                 language_id=language_id,
                 exaggeration=request.exaggeration,
                 cfg_weight=request.cfg_weight,
@@ -824,6 +1044,7 @@ async def text_to_speech(request: TTSRequest):
         buffer = await generate_speech_internal(
             text=request.input,
             voice_sample_path=voice_sample_path,
+            conversation_id=request.conversation_id,
             language_id=language_id,
             exaggeration=request.exaggeration,
             cfg_weight=request.cfg_weight,
@@ -863,7 +1084,13 @@ async def text_to_speech_with_upload(
     streaming_chunk_size: Optional[int] = Form(None, description="Characters per streaming chunk (50-500)", ge=50, le=500),
     streaming_strategy: Optional[str] = Form(None, description="Chunking strategy (sentence, paragraph, fixed, word)"),
     streaming_quality: Optional[str] = Form(None, description="Quality preset (fast, balanced, high)"),
-    voice_file: Optional[UploadFile] = File(None, description="Optional voice sample file for custom voice cloning")
+    voice_file: Optional[UploadFile] = File(None, description="Optional voice sample file for custom voice cloning"),
+    conversation_id_form: Optional[str] = Form(None, alias="conversation_id"),
+    conversation_id_camel: Optional[str] = Form(None, alias="conversationId"),
+    session_form: Optional[str] = Form(None, alias="session"),
+    session_id_form: Optional[str] = Form(None, alias="session_id"),
+    session_camel: Optional[str] = Form(None, alias="sessionId"),
+    conversation_id_header: Optional[str] = Header(None, alias="X-Conversation-ID"),
 ):
     """Generate speech from text using Chatterbox TTS with optional voice file upload"""
     
@@ -902,6 +1129,16 @@ async def text_to_speech_with_upload(
     voice_sample_path = Config.VOICE_SAMPLE_PATH  # Default
     language_id = "en"  # Default language
     
+    # Resolve conversation identifier
+    conversation_id = resolve_conversation_id_from_form(
+        conversation_id_header,
+        conversation_id_form,
+        conversation_id_camel,
+        session_form,
+        session_id_form,
+        session_camel,
+    )
+
     # First, try to resolve voice name from library if no file uploaded
     if not voice_file:
         voice_sample_path, language_id = resolve_voice_path_and_language(voice)
@@ -923,7 +1160,31 @@ async def text_to_speech_with_upload(
             
             voice_sample_path = temp_voice_path
             print(f"Using uploaded voice file: {voice_file.filename} ({len(file_content):,} bytes)")
-            
+
+            # Convert non-WAV uploads to WAV for consistent processing
+            if file_ext.lower() != ".wav":
+                try:
+                    voice_sample_path = await ensure_wav_voice_sample(voice_sample_path)
+                    temp_voice_path = voice_sample_path
+                    print(f"🎚️ Converted uploaded voice file to WAV: {voice_sample_path}")
+                except HTTPException:
+                    raise
+                except Exception as convert_error:
+                    if temp_voice_path and os.path.exists(temp_voice_path):
+                        try:
+                            os.unlink(temp_voice_path)
+                        except OSError:
+                            pass
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "error": {
+                                "message": f"Failed to convert voice file to WAV: {convert_error}",
+                                "type": "file_processing_error",
+                            }
+                        },
+                    ) from convert_error
+
         except HTTPException:
             raise
         except Exception as e:
@@ -952,6 +1213,7 @@ async def text_to_speech_with_upload(
                     async for sse_event in generate_speech_sse(
                         text=input,
                         voice_sample_path=voice_sample_path,
+                        conversation_id=conversation_id,
                         language_id=language_id,
                         exaggeration=exaggeration,
                         cfg_weight=cfg_weight,
@@ -966,6 +1228,7 @@ async def text_to_speech_with_upload(
                     if temp_voice_path and os.path.exists(temp_voice_path):
                         try:
                             os.unlink(temp_voice_path)
+                            await invalidate_voice_prompt(temp_voice_path)
                             print(f"🗑️ Cleaned up temporary voice file: {temp_voice_path}")
                         except Exception as e:
                             print(f"⚠️ Warning: Failed to clean up temporary voice file: {e}")
@@ -985,6 +1248,7 @@ async def text_to_speech_with_upload(
             buffer = await generate_speech_internal(
                 text=input,
                 voice_sample_path=voice_sample_path,
+                conversation_id=conversation_id,
                 language_id=language_id,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
@@ -1005,6 +1269,7 @@ async def text_to_speech_with_upload(
         if temp_voice_path and os.path.exists(temp_voice_path):
             try:
                 os.unlink(temp_voice_path)
+                await invalidate_voice_prompt(temp_voice_path)
                 print(f"🗑️ Cleaned up temporary voice file: {temp_voice_path}")
             except Exception as e:
                 print(f"⚠️ Warning: Failed to clean up temporary voice file: {e}")
@@ -1022,7 +1287,7 @@ async def text_to_speech_with_upload(
     summary="Stream speech generation from text",
     description="Generate and stream speech audio in real-time. Supports voice names from the voice library or defaults to configured voice sample."
 )
-async def stream_text_to_speech(request: TTSRequest):
+async def stream_text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
     """Stream speech generation from text using Chatterbox TTS with voice selection support"""
     
     # Resolve voice name to file path and language
@@ -1033,6 +1298,7 @@ async def stream_text_to_speech(request: TTSRequest):
         generate_speech_streaming(
             text=request.input,
             voice_sample_path=voice_sample_path,
+            conversation_id=request.conversation_id,
             language_id=language_id,
             exaggeration=request.exaggeration,
             cfg_weight=request.cfg_weight,
@@ -1073,7 +1339,13 @@ async def stream_text_to_speech_with_upload(
     streaming_chunk_size: Optional[int] = Form(None, description="Characters per streaming chunk (50-500)", ge=50, le=500),
     streaming_strategy: Optional[str] = Form(None, description="Chunking strategy (sentence, paragraph, fixed, word)"),
     streaming_quality: Optional[str] = Form(None, description="Quality preset (fast, balanced, high)"),
-    voice_file: Optional[UploadFile] = File(None, description="Optional voice sample file for custom voice cloning")
+    voice_file: Optional[UploadFile] = File(None, description="Optional voice sample file for custom voice cloning"),
+    conversation_id_form: Optional[str] = Form(None, alias="conversation_id"),
+    conversation_id_camel: Optional[str] = Form(None, alias="conversationId"),
+    session_form: Optional[str] = Form(None, alias="session"),
+    session_id_form: Optional[str] = Form(None, alias="session_id"),
+    session_camel: Optional[str] = Form(None, alias="sessionId"),
+    conversation_id_header: Optional[str] = Header(None, alias="X-Conversation-ID"),
 ):
     """Stream speech generation from text using Chatterbox TTS with optional voice file upload"""
     
@@ -1103,7 +1375,16 @@ async def stream_text_to_speech_with_upload(
     temp_voice_path = None
     voice_sample_path = Config.VOICE_SAMPLE_PATH  # Default
     language_id = "en"  # Default language
-    
+
+    conversation_id = resolve_conversation_id_from_form(
+        conversation_id_header,
+        conversation_id_form,
+        conversation_id_camel,
+        session_form,
+        session_id_form,
+        session_camel,
+    )
+
     # First, try to resolve voice name from library if no file uploaded
     if not voice_file:
         voice_sample_path, language_id = resolve_voice_path_and_language(voice)
@@ -1125,7 +1406,31 @@ async def stream_text_to_speech_with_upload(
             
             voice_sample_path = temp_voice_path
             print(f"Using uploaded voice file for streaming: {voice_file.filename} ({len(file_content):,} bytes)")
-            
+
+            # Convert non-WAV uploads to WAV for consistent processing
+            if file_ext.lower() != ".wav":
+                try:
+                    voice_sample_path = await ensure_wav_voice_sample(voice_sample_path)
+                    temp_voice_path = voice_sample_path
+                    print(f"🎚️ Converted uploaded streaming voice file to WAV: {voice_sample_path}")
+                except HTTPException:
+                    raise
+                except Exception as convert_error:
+                    if temp_voice_path and os.path.exists(temp_voice_path):
+                        try:
+                            os.unlink(temp_voice_path)
+                        except OSError:
+                            pass
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "error": {
+                                "message": f"Failed to convert voice file to WAV: {convert_error}",
+                                "type": "file_processing_error",
+                            }
+                        },
+                    ) from convert_error
+
         except HTTPException:
             raise
         except Exception as e:
@@ -1151,6 +1456,7 @@ async def stream_text_to_speech_with_upload(
             async for chunk in generate_speech_streaming(
                 text=input,
                 voice_sample_path=voice_sample_path,
+                conversation_id=conversation_id,
                 language_id=language_id,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
@@ -1165,10 +1471,11 @@ async def stream_text_to_speech_with_upload(
             if temp_voice_path and os.path.exists(temp_voice_path):
                 try:
                     os.unlink(temp_voice_path)
+                    await invalidate_voice_prompt(temp_voice_path)
                     print(f"🗑️ Cleaned up temporary voice file: {temp_voice_path}")
                 except Exception as e:
                     print(f"⚠️ Warning: Failed to clean up temporary voice file: {e}")
-    
+
     # Create streaming response
     return StreamingResponse(
         streaming_with_cleanup(),

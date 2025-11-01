@@ -8,6 +8,7 @@ This script tests the new status tracking endpoints to ensure they work correctl
 import requests
 import time
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 # Configuration
@@ -138,7 +139,8 @@ def test_status_during_generation():
                 json={
                     "input": "This is a test of the status tracking system. We want to see how the progress is reported during text-to-speech generation with multiple chunks of text that should demonstrate the chunking and processing stages.",
                     "exaggeration": 0.7,
-                    "temperature": 0.8
+                    "temperature": 0.8,
+                    "conversation_id": f"status-monitor-{uuid.uuid4().hex}",
                 },
                 timeout=60
             )
@@ -198,7 +200,8 @@ def test_concurrent_requests():
                 f"{API_BASE_URL}/v1/audio/speech",
                 json={
                     "input": f"This is concurrent request number {request_id} testing the status system.",
-                    "exaggeration": 0.5 + (request_id * 0.1)
+                    "exaggeration": 0.5 + (request_id * 0.1),
+                    "conversation_id": f"status-concurrent-{request_id}-{uuid.uuid4().hex}",
                 },
                 timeout=30
             )

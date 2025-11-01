@@ -222,6 +222,9 @@ The frontend uses a reverse proxy to route requests, so when running with `--pro
 
 ## API Usage
 
+> **Conversation IDs**
+> Every request must include a stable `conversation_id` to enable prompt caching and per-session serialization. The field accepts `conversation_id`, `conversationId`, `session`, `session_id`, or `sessionId`. Alternatively, provide the value in the `X-Conversation-ID` header. Clients that cannot supply an identifier may enable the feature flag `ALLOW_MISSING_CONVERSATION_ID`, but caching benefits will be disabled.
+
 ### Basic Text-to-Speech (Default Voice)
 
 This endpoint works for both the API-only and full-stack setups.
@@ -229,7 +232,7 @@ This endpoint works for both the API-only and full-stack setups.
 ```bash
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Your text here"}' \
+  -d '{"input": "Your text here", "conversation_id": "demo-session-1"}' \
   --output speech.wav
 ```
 
@@ -238,7 +241,7 @@ curl -X POST http://localhost:4123/v1/audio/speech \
 ```bash
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"input": "Dramatic speech!", "exaggeration": 1.2, "cfg_weight": 0.3, "temperature": 0.9}' \
+  -d '{"input": "Dramatic speech!", "exaggeration": 1.2, "cfg_weight": 0.3, "temperature": 0.9, "conversation_id": "demo-session-2"}' \
   --output dramatic.wav
 ```
 
@@ -250,6 +253,7 @@ Upload your own voice sample for personalized speech:
 curl -X POST http://localhost:4123/v1/audio/speech/upload \
   -F "input=Hello with my custom voice!" \
   -F "exaggeration=0.8" \
+  -F "conversation_id=demo-session-3" \
   -F "voice_file=@my_voice.mp3" \
   --output custom_voice_speech.wav
 ```

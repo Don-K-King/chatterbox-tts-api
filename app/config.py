@@ -44,7 +44,13 @@ class Config:
 
     # Multilingual model settings
     USE_MULTILINGUAL_MODEL = os.getenv('USE_MULTILINGUAL_MODEL', 'true').lower() == 'true'
-    
+
+    # Conversation caching and prompts
+    VOICE_PROMPT_CACHE_SIZE = int(os.getenv('VOICE_PROMPT_CACHE_SIZE', 32))
+    CONVERSATION_CACHE_TTL_SECONDS = int(os.getenv('CONVERSATION_CACHE_TTL_SECONDS', 900))
+    CONVERSATION_AUDIO_CACHE_SIZE = int(os.getenv('CONVERSATION_AUDIO_CACHE_SIZE', 4))
+    ALLOW_MISSING_CONVERSATION_ID = os.getenv('ALLOW_MISSING_CONVERSATION_ID', 'false').lower() == 'true'
+
     # Memory management settings
     MEMORY_CLEANUP_INTERVAL = int(os.getenv('MEMORY_CLEANUP_INTERVAL', 5))
     CUDA_CACHE_CLEAR_INTERVAL = int(os.getenv('CUDA_CACHE_CLEAR_INTERVAL', 3))
@@ -82,6 +88,12 @@ class Config:
             raise ValueError(f"LONG_TEXT_JOB_RETENTION_DAYS must be positive, got {cls.LONG_TEXT_JOB_RETENTION_DAYS}")
         if cls.LONG_TEXT_MAX_CONCURRENT_JOBS <= 0:
             raise ValueError(f"LONG_TEXT_MAX_CONCURRENT_JOBS must be positive, got {cls.LONG_TEXT_MAX_CONCURRENT_JOBS}")
+        if cls.VOICE_PROMPT_CACHE_SIZE <= 0:
+            raise ValueError(f"VOICE_PROMPT_CACHE_SIZE must be positive, got {cls.VOICE_PROMPT_CACHE_SIZE}")
+        if cls.CONVERSATION_CACHE_TTL_SECONDS <= 0:
+            raise ValueError(f"CONVERSATION_CACHE_TTL_SECONDS must be positive, got {cls.CONVERSATION_CACHE_TTL_SECONDS}")
+        if cls.CONVERSATION_AUDIO_CACHE_SIZE <= 0:
+            raise ValueError(f"CONVERSATION_AUDIO_CACHE_SIZE must be positive, got {cls.CONVERSATION_AUDIO_CACHE_SIZE}")
 
 
 def detect_device():

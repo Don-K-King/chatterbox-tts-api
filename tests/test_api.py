@@ -5,6 +5,7 @@ Pytest-based API tests for the Chatterbox TTS API
 
 import pytest
 from pathlib import Path
+import uuid
 
 # Import test utilities (these are defined in conftest.py and available as fixtures)
 # Import TEST_TEXTS and TEST_PARAMETERS directly here
@@ -31,9 +32,10 @@ def generate_speech_and_validate(api_client, text, output_file=None, params=None
     """Generate speech and validate response"""
     import time
     
-    payload = {"input": text}
+    payload = {"input": text, "conversation_id": f"test-{uuid.uuid4().hex}"}
     if params:
         payload.update(params)
+        payload.setdefault("conversation_id", f"test-{uuid.uuid4().hex}")
     
     start_time = time.time()
     response = api_client.post(endpoint, json=payload)
@@ -74,6 +76,9 @@ def run_concurrent_requests(api_client, requests_data, max_workers=3):
     def make_request(request_data):
         endpoint = request_data.get("endpoint", "/v1/audio/speech")
         payload = request_data.get("payload", {})
+        if "conversation_id" not in payload:
+            payload = dict(payload)
+            payload["conversation_id"] = f"batch-{uuid.uuid4().hex}"
         request_id = request_data.get("id", 0)
         
         try:

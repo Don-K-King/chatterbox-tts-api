@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Volume2 } from 'lucide-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '../components/ui/button';
@@ -62,10 +62,12 @@ export default function TTSPage() {
     settings: progressSettings,
     updateSettings: updateProgressSettings,
     trackRequest,
+    isMyRequest,
     shouldShowProgress,
     dismissProgress,
     isLongTextRequest,
-    sessionId
+    sessionId,
+    currentRequestId
   } = useProgressSettings();
 
   // Streaming TTS management
@@ -200,6 +202,27 @@ export default function TTSPage() {
     isLoadingStats
   } = useStatusMonitoring(apiBaseUrl);
 
+  const backendRequestId = progress?.request_id;
+  const isProgressProcessing = progress?.is_processing;
+
+  useEffect(() => {
+    if (!isProgressProcessing || !backendRequestId || !currentRequestId) {
+      return;
+    }
+
+    if (!isMyRequest(backendRequestId)) {
+      const requestType = isLongTextRequest(currentRequestId) ? 'long-text' : 'regular';
+      trackRequest(backendRequestId, requestType);
+    }
+  }, [
+    backendRequestId,
+    currentRequestId,
+    isProgressProcessing,
+    isMyRequest,
+    isLongTextRequest,
+    trackRequest
+  ]);
+
   const { data: health, isLoading: isLoadingHealth } = useQuery({
     queryKey: ['health', apiBaseUrl],
     queryFn: ttsService.getHealth,
@@ -273,6 +296,8 @@ export default function TTSPage() {
     // Check if we should use long text processing
     if (shouldUseLongText(text)) {
 
+      const language = selectedVoice?.language ?? 'en';
+
       setTimeout(() => {
         setIsClickedGenerating(false);
       }, 8000);
@@ -284,7 +309,7 @@ export default function TTSPage() {
         exaggeration,
         cfg_weight: cfgWeight,
         temperature,
-        language: 'en',
+        language,
         output_format: 'mp3',
         session_id: sessionId
       };
