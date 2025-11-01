@@ -14,6 +14,7 @@ import { LANGUAGE_OPTIONS } from '../constants/languages';
 import type { SupportedLanguageItem } from '../types';
 
 const DEFAULT_TEST_TEXT = 'Hello! This is a quick test using the selected voice.';
+const DEFAULT_TEST_SESSION_ID = 'voice-manager-preview-session';
 
 export default function VoiceManagerPage() {
   const {
@@ -39,7 +40,10 @@ export default function VoiceManagerPage() {
   } = useDefaultVoice();
 
   const { apiBaseUrl } = useApiEndpoint();
-  const ttsService = useMemo(() => createTTSService(apiBaseUrl), [apiBaseUrl]);
+  const ttsService = useMemo(
+    () => createTTSService(apiBaseUrl, DEFAULT_TEST_SESSION_ID),
+    [apiBaseUrl]
+  );
 
   const [testText, setTestText] = useState(DEFAULT_TEST_TEXT);
   const [testVoiceId, setTestVoiceId] = useState<string | null>(null);
