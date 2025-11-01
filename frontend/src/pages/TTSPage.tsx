@@ -273,6 +273,8 @@ export default function TTSPage() {
     // Check if we should use long text processing
     if (shouldUseLongText(text)) {
 
+      const language = selectedVoice?.language ?? 'en';
+
       setTimeout(() => {
         setIsClickedGenerating(false);
       }, 8000);
@@ -284,7 +286,7 @@ export default function TTSPage() {
         exaggeration,
         cfg_weight: cfgWeight,
         temperature,
-        language: 'en',
+        language,
         output_format: 'mp3',
         session_id: sessionId
       };
