@@ -78,6 +78,9 @@ async def get_tts_progress() -> Dict[str, Any]:
         return {
             "is_processing": True,
             "status": status.get("status"),
+            "request_id": status.get("request_id"),
+            "conversation_id": status.get("conversation_id"),
+            "session_id": status.get("session_id") or status.get("conversation_id"),
             "current_step": progress.get("current_step", ""),
             "current_chunk": progress.get("current_chunk", 0),
             "total_chunks": progress.get("total_chunks", 0),
@@ -90,6 +93,9 @@ async def get_tts_progress() -> Dict[str, Any]:
         return {
             "is_processing": False,
             "status": "idle",
+            "request_id": None,
+            "conversation_id": None,
+            "session_id": None,
             "message": "No active TTS requests"
         }
 

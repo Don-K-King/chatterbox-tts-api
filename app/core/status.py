@@ -51,6 +51,7 @@ class TTSRequestInfo:
     text_length: int = 0
     text_preview: str = ""
     voice_source: str = "default"
+    conversation_id: Optional[str] = None
     parameters: Dict[str, Any] = None
     progress: TTSProgressInfo = None
     error_message: Optional[str] = None
@@ -92,7 +93,8 @@ class TTSStatusManager:
         self,
         text: str,
         voice_source: str = "default",
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
     ) -> str:
         """Start tracking a new TTS request"""
         with self._lock:
@@ -105,6 +107,7 @@ class TTSStatusManager:
                 text_length=len(text),
                 text_preview=text[:100] + "..." if len(text) > 100 else text,
                 voice_source=voice_source,
+                conversation_id=conversation_id,
                 parameters=parameters or {}
             )
             
@@ -192,7 +195,10 @@ class TTSStatusManager:
             request_dict['is_active'] = self._current_request.is_active
             request_dict['is_processing'] = True
             request_dict['total_requests'] = self._total_requests
-            
+            if self._current_request.conversation_id:
+                request_dict['conversation_id'] = self._current_request.conversation_id
+                request_dict['session_id'] = self._current_request.conversation_id
+
             # Format progress info and ensure all required fields are present
             if self._current_request.progress.estimated_completion:
                 request_dict['progress']['estimated_completion'] = (
@@ -257,10 +263,11 @@ _status_manager = TTSStatusManager()
 def start_tts_request(
     text: str,
     voice_source: str = "default",
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None
 ) -> str:
     """Start tracking a new TTS request"""
-    return _status_manager.start_request(text, voice_source, parameters)
+    return _status_manager.start_request(text, voice_source, parameters, conversation_id)
 
 
 def update_tts_status(

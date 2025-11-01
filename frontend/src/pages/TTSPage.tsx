@@ -202,7 +202,7 @@ export default function TTSPage() {
     isLoadingStats
   } = useStatusMonitoring(apiBaseUrl);
 
-  const backendRequestId = progress?.request_id;
+  const backendRequestId = progress?.request_id ?? progress?.session_id;
   const isProgressProcessing = progress?.is_processing;
 
   useEffect(() => {
@@ -296,7 +296,7 @@ export default function TTSPage() {
     // Check if we should use long text processing
     if (shouldUseLongText(text)) {
 
-      const language = selectedVoice?.language ?? 'en';
+      const language = selectedVoice?.language?.toLowerCase();
 
       setTimeout(() => {
         setIsClickedGenerating(false);
@@ -309,7 +309,7 @@ export default function TTSPage() {
         exaggeration,
         cfg_weight: cfgWeight,
         temperature,
-        language,
+        ...(language ? { language } : {}),
         output_format: 'mp3',
         session_id: sessionId
       };
@@ -349,6 +349,10 @@ export default function TTSPage() {
       // Also include voice file if it's a client-side voice (for backward compatibility)
       if (selectedVoice.file) {
         requestData.voice_file = selectedVoice.file;
+      }
+
+      if (selectedVoice.language) {
+        requestData.language = selectedVoice.language.toLowerCase();
       }
     }
 
@@ -750,12 +754,12 @@ export default function TTSPage() {
       </div>
 
       {/* Progress Overlay */}
-      {shouldShowProgress(progress?.request_id) && progress && (
+      {shouldShowProgress(backendRequestId) && progress && (
         <StatusProgressOverlay
           progress={progress}
-          isVisible={shouldShowProgress(progress?.request_id)}
+          isVisible={shouldShowProgress(backendRequestId)}
           onDismiss={dismissProgress}
-          isLongText={isLongTextRequest(progress?.request_id)}
+          isLongText={isLongTextRequest(backendRequestId)}
         />
       )}
     </>
