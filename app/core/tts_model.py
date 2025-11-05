@@ -6,6 +6,10 @@ import os
 import asyncio
 from enum import Enum
 from typing import Optional, Dict, Any
+from app.patches import ensure_headless_tqdm_defaults
+
+ensure_headless_tqdm_defaults()
+
 from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 from app.core.mtl import SUPPORTED_LANGUAGES
