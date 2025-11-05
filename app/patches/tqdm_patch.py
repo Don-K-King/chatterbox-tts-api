@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import sys
 from functools import wraps
-from typing import Callable, Optional
+from typing import Callable, Optional, Type, Union
 
 try:
     import tqdm.auto as _tqdm_auto
 except Exception:  # pragma: no cover - tqdm should always be available
     _tqdm_auto = None  # type: ignore[assignment]
 
-_ORIGINAL_TQDM: Optional[Callable[..., object]] = None
+_OriginalTqdmType = Union[Callable[..., object], Type[object]]
+
+_ORIGINAL_TQDM: Optional[_OriginalTqdmType] = None
 _PATCH_APPLIED = False
 
 
@@ -24,8 +26,26 @@ def _determine_disable_default() -> bool:
         return True
 
 
-def _build_wrapper(original: Callable[..., object]) -> Callable[..., object]:
+def _build_wrapper(original: _OriginalTqdmType) -> _OriginalTqdmType:
     """Wrap ``tqdm`` so ``disable`` defaults to headless-friendly behaviour."""
+
+    if isinstance(original, type):
+        # ``tqdm.auto.tqdm`` is usually a class. Some libraries (huggingface_hub)
+        # subclass it during import, so we must preserve class semantics.  We
+        # therefore derive a thin subclass that tweaks the default ``disable``
+        # argument while keeping every other behaviour intact.
+        class HeadlessTqdm(original):  # type: ignore[misc, valid-type]
+            def __init__(self, *args, **kwargs):
+                kwargs.setdefault("disable", _determine_disable_default())
+                super().__init__(*args, **kwargs)
+
+        # Mirror the original metadata so repr/debugging remains familiar.
+        HeadlessTqdm.__name__ = getattr(original, "__name__", "tqdm")
+        HeadlessTqdm.__qualname__ = getattr(original, "__qualname__", HeadlessTqdm.__name__)
+        HeadlessTqdm.__module__ = getattr(original, "__module__", HeadlessTqdm.__module__)
+        HeadlessTqdm.__doc__ = getattr(original, "__doc__", HeadlessTqdm.__doc__)
+
+        return HeadlessTqdm  # type: ignore[return-value]
 
     @wraps(original)
     def tqdm_with_default(*args, **kwargs):
