@@ -152,6 +152,23 @@ curl -X POST http://localhost:4123/v1/audio/speech \
   --output test.wav
 ```
 
+#### Blackwell / Evido GPU-Pinning & Netzwerk-Alias
+
+Die Blackwell-Compose-Datei unterstützt GPU-Pinning per UUID und hängt den Service in das externe
+Netzwerk `evido-live-translate` ein (Alias: `chatterbox-tts`). Damit kann das Backend konsistent
+`http://chatterbox-tts:4123` aufrufen.
+
+1. In `.env` setzen (Beispielwerte):
+   ```bash
+   TTS_GPU_UUID=GPU-bb0c8ffb-67b6-0df5-e3c3-3d0e2d2b63e6
+   TTS_CUDA_VISIBLE_DEVICES=0
+   ```
+2. Sicherstellen, dass das externe Netzwerk existiert (im Ziel-Stack bereits vorhanden).
+3. Healthcheck aus dem Evido-Backend-Container:
+   ```bash
+   curl http://chatterbox-tts:4123/health
+   ```
+
 <details>
 <summary><strong>🚀 Running with the Web UI (Full Stack)</strong></summary>
 
