@@ -6,7 +6,6 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.blackwell
-    container_name: chatterbox-tts-api-blackwell
     ports:
       - '${PORT:-4123}:${PORT:-4123}'
     environment:
@@ -30,8 +29,11 @@ services:
       - VOICE_LIBRARY_DIR=${VOICE_LIBRARY_DIR:-/voices}
 
       # NVIDIA/CUDA settings
-      - NVIDIA_VISIBLE_DEVICES=all
+      # Pin to a specific GPU UUID when provided.
+      - NVIDIA_VISIBLE_DEVICES=${TTS_GPU_UUID:-all}
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Optional CUDA index mapping inside the container.
+      - CUDA_VISIBLE_DEVICES=${TTS_CUDA_VISIBLE_DEVICES:-0}
     volumes:
       # Mount voice sample file (optional)
       - ${VOICE_SAMPLE_HOST_PATH:-../voice-sample.mp3}:/app/voice-sample.mp3:ro
@@ -53,6 +55,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+              # Enable UUID-based pinning when set in .env
+              device_ids: ['${TTS_GPU_UUID}']
 
     restart: unless-stopped
 
@@ -62,6 +66,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 300s
+    networks:
+      evido-live-translate:
+        aliases:
+          - chatterbox-tts
 
   # Frontend Service with integrated proxy (optional - requires 'frontend' profile)
   frontend:
@@ -69,7 +77,6 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    container_name: chatterbox-tts-frontend
     ports:
       - '${FRONTEND_PORT:-4321}:80' # Frontend serves on port 80 internally
     depends_on:
@@ -83,3 +90,7 @@ volumes:
     driver: local
   chatterbox-longtext-data:
     driver: local
+
+networks:
+  evido-live-translate:
+    external: true
