@@ -1,0 +1,8 @@
+services:
+  frontend:
+    networks:
+      - evido-live-translate
+
+networks:
+  evido-live-translate:
+    external: true
