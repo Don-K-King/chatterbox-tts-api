@@ -56,7 +56,6 @@ services:
               count: 1
               capabilities: [gpu]
               # Enable UUID-based pinning when set in .env
-              device_ids: ['${TTS_GPU_UUID}']
 
     restart: unless-stopped
 
