@@ -63,6 +63,13 @@ cp .env.example .env
 | `DEVICE`        | `auto`  | Device (auto/cuda/cpu/mps)               |
 | `EXAGGERATION`  | `0.5`   | Voice emotion intensity                  |
 
+### External Network (Frontend + API)
+
+The frontend can be attached to the same external Docker network as the API
+service via `docker-compose.override.yml` in the repo root. Ensure the
+`evido-live-translate` network exists before running compose so both
+`frontend` and `chatterbox-tts` resolve each other on that network.
+
 ## Docker Compose Files
 
 | File                        | Description         | Use Case                      |
