@@ -58,6 +58,9 @@ class Config:
     
     # CORS settings
     CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*')
+
+    # Diagnostics
+    TTS_DEBUG_HTTP = os.getenv("TTS_DEBUG_HTTP", "false").lower() in {"1", "true", "yes", "on"}
     
     @classmethod
     def validate(cls):
