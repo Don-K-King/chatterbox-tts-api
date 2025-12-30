@@ -145,6 +145,10 @@ docker compose -f docker/docker-compose.blackwell.yml --profile frontend up -d  
 # Watch the logs as it initializes (the first use of TTS takes the longest)
 docker logs chatterbox-tts-api -f
 
+# Non-2xx responses from /v1/audio/speech emit a structured "TTS HTTP error response"
+# log block with diagnostics (status code, conversation_id source/value, voice resolution,
+# redacted request metadata, and a truncated response body).
+
 # Test the API
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
