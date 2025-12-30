@@ -5,6 +5,7 @@ HTTP logging helpers for TTS error diagnostics.
 import hashlib
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Request
@@ -23,7 +24,13 @@ from app.core.voice_library import get_voice_library
 logger = logging.getLogger(__name__)
 
 _BODY_LOG_LIMIT_BYTES = 16 * 1024
-_REQUEST_HEADER_ALLOWLIST = {"x-conversation-id", "content-type", "accept"}
+_REQUEST_HEADER_ALLOWLIST = {
+    "x-conversation-id",
+    "x-request-id",
+    "x-correlation-id",
+    "content-type",
+    "accept",
+}
 _RESPONSE_HEADER_ALLOWLIST = {"content-type", "content-length"}
 _CONVERSATION_ID_FIELDS = (
     "conversation_id",
@@ -34,6 +41,7 @@ _CONVERSATION_ID_FIELDS = (
 )
 _SESSION_ID_FIELDS = ("session_id", "sessionId")
 _SEGMENT_ID_FIELDS = ("segment_id", "segmentId")
+_REQUEST_ID_HEADERS = ("x-request-id", "x-correlation-id")
 
 
 def _build_speech_endpoint_prefixes() -> Tuple[str, ...]:
@@ -112,7 +120,7 @@ def _compute_chunk_info(
     request_path: str,
 ) -> Dict[str, Any]:
     if not text:
-        return {"n_chunks": 0, "chunk_lengths": []}
+        return {"chunk_count": 0, "chunks": []}
 
     is_streaming = stream_format == "sse" or "/stream" in request_path
     if is_streaming:
@@ -126,7 +134,10 @@ def _compute_chunk_info(
     else:
         chunks = split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)
 
-    return {"n_chunks": len(chunks), "chunk_lengths": [len(chunk) for chunk in chunks]}
+    chunk_details = [
+        {"length": len(chunk), "sha256": _hash_text(chunk)} for chunk in chunks if chunk is not None
+    ]
+    return {"chunk_count": len(chunks), "chunks": chunk_details}
 
 
 async def _parse_request_payload(request: Request) -> Dict[str, Any]:
@@ -177,13 +188,11 @@ def _build_mapping_info(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:  # pragma: no cover - defensive logging safety
         logger.debug("Unable to resolve voice mapping for diagnostics: %s", exc)
 
-    voice_resolved = resolved_voice or default_voice
-
     return {
         "provider": "chatterbox",
-        "mapping_key": voice_resolved or voice_name,
+        "mapping_key": resolved_voice or default_voice or voice_name,
         "voice_requested": voice_name,
-        "voice_resolved": voice_resolved,
+        "voice_resolved": resolved_voice or default_voice,
         "fallback_used": fallback_used,
         "voice_source": voice_source,
         "language": language,
@@ -240,6 +249,43 @@ def _format_response_body(body: Any) -> Tuple[Optional[str], bool, bool]:
     if not raw:
         return "", is_json, True
     return raw, is_json, False
+
+
+def _extract_request_ids(headers: Dict[str, str]) -> Dict[str, Optional[str]]:
+    normalized = {str(key).lower(): value for key, value in headers.items()}
+    request_id = None
+    correlation_id = None
+    for header in _REQUEST_ID_HEADERS:
+        value = _normalize_optional(normalized.get(header))
+        if not value:
+            continue
+        if header == "x-request-id":
+            request_id = request_id or value
+        elif header == "x-correlation-id":
+            correlation_id = correlation_id or value
+    return {"request_id": request_id, "correlation_id": correlation_id}
+
+
+def _extract_response_content_type(headers: Dict[str, str]) -> Optional[str]:
+    normalized = {str(key).lower(): value for key, value in headers.items()}
+    return _normalize_optional(normalized.get("content-type"))
+
+
+def _build_voice_library_snapshot(voice_requested: Optional[str]) -> Dict[str, Any]:
+    try:
+        voice_library = get_voice_library()
+        voices = voice_library.list_voices()
+        default_voice = voice_library.get_default_voice()
+        has_voice = voice_library.resolve_voice_name(voice_requested) if voice_requested else None
+    except Exception as exc:  # pragma: no cover - best effort diagnostics
+        logger.debug("Unable to fetch voice library snapshot: %s", exc)
+        return {"error": "unavailable"}
+
+    return {
+        "voices_count": len(voices),
+        "default_voice": default_voice,
+        "has_voice": bool(has_voice) if voice_requested else None,
+    }
 
 
 async def log_tts_http_error(
@@ -312,6 +358,7 @@ def _log_tts_http_error_from_context(
     request_path: Optional[str] = None,
 ) -> None:
     request_path = request_path or ""
+    timestamp = datetime.now(timezone.utc).isoformat()
     conversation_id, conversation_source, conversation_empty = _extract_with_source(
         payload, _CONVERSATION_ID_FIELDS
     )
@@ -333,6 +380,7 @@ def _log_tts_http_error_from_context(
     mapping_info = _build_mapping_info(payload)
     redacted_payload = _redact_payload(payload, request_path)
     request_headers = (request_context or {}).get("headers") or {}
+    request_ids = _extract_request_ids(request_headers)
     filtered_request_headers = _filter_headers(dict(request_headers), _REQUEST_HEADER_ALLOWLIST)
     filtered_response_headers = _filter_headers(response_headers, _RESPONSE_HEADER_ALLOWLIST)
 
@@ -340,13 +388,20 @@ def _log_tts_http_error_from_context(
     response_body_logged, truncated = (
         _truncate_body(formatted_body) if formatted_body is not None else ("", False)
     )
+    response_content_type = _extract_response_content_type(response_headers)
 
     request_method = (request_context or {}).get("method") or "INTERNAL"
     request_url = (request_context or {}).get("url") or request_path or "internal://tts"
 
     log_payload = {
+        "timestamp": timestamp,
+        "endpoint": request_path,
+        "method": request_method,
         "status_code": status_code,
+        "request_id": request_ids["request_id"],
+        "correlation_id": request_ids["correlation_id"],
         "provider": mapping_info["provider"],
+        "mapping_key": mapping_info["mapping_key"],
         "conversation_id": {
             "source": conversation_source,
             "value": conversation_id,
@@ -358,6 +413,7 @@ def _log_tts_http_error_from_context(
         "language": mapping_info["language"],
         "response_format": mapping_info["response_format"],
         "response_body_truncated": response_body_logged if formatted_body is not None else None,
+        "response_content_type": response_content_type,
         "request_json_redacted": redacted_payload,
         "correlation": {
             "session_id": session_id,
@@ -377,30 +433,12 @@ def _log_tts_http_error_from_context(
         },
     }
 
+    if Config.TTS_DEBUG_HTTP and status_code >= 400:
+        log_payload["voice_library_snapshot"] = _build_voice_library_snapshot(
+            mapping_info["voice_requested"]
+        )
+
     if status_code >= 500:
         logger.error("TTS HTTP error response", extra={"tts_http_error": log_payload}, exc_info=exception)
     else:
         logger.warning("TTS HTTP error response", extra={"tts_http_error": log_payload})
-
-    if Config.TTS_DEBUG_HTTP and status_code >= 400:
-        _log_debug_voice_library_snapshot()
-
-
-def _log_debug_voice_library_snapshot() -> None:
-    try:
-        voice_library = get_voice_library()
-        voices = voice_library.list_voices()
-        default_voice = voice_library.get_default_voice()
-    except Exception as exc:  # pragma: no cover - best effort diagnostics
-        logger.debug("Unable to fetch voice library snapshot: %s", exc)
-        return
-
-    logger.info(
-        "TTS debug snapshot",
-        extra={
-            "tts_debug_snapshot": {
-                "voices_count": len(voices),
-                "default_voice": default_voice,
-            }
-        },
-    )
