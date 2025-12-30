@@ -71,6 +71,18 @@ def _extract_first(payload: Dict[str, Any], fields: Tuple[str, ...]) -> Optional
     return None
 
 
+def _extract_with_source(
+    payload: Dict[str, Any],
+    fields: Tuple[str, ...],
+) -> Tuple[Optional[str], Optional[str], bool]:
+    for field in fields:
+        if field in payload:
+            raw_value = payload.get(field)
+            normalized = _normalize_optional(raw_value)
+            return normalized, f"body.{field}", not bool(normalized)
+    return None, None, True
+
+
 def _filter_headers(headers: Dict[str, str], allowlist: set[str]) -> Dict[str, str]:
     filtered = {}
     for key, value in headers.items():
@@ -143,10 +155,12 @@ async def _parse_request_payload(request: Request) -> Dict[str, Any]:
 def _build_mapping_info(payload: Dict[str, Any]) -> Dict[str, Any]:
     voice_name = _normalize_optional(payload.get("voice"))
     language = _normalize_optional(payload.get("language"))
+    response_format = _normalize_optional(payload.get("response_format"))
     voice_source = "default"
     resolved_voice = None
     resolved_language = None
     default_voice = None
+    fallback_used = False
 
     try:
         voice_library = get_voice_library()
@@ -156,16 +170,24 @@ def _build_mapping_info(payload: Dict[str, Any]) -> Dict[str, Any]:
             if resolved_voice:
                 voice_source = "voice_library"
                 resolved_language = voice_library.get_voice_language(voice_name)
+            else:
+                fallback_used = True
+        elif default_voice:
+            fallback_used = True
     except Exception as exc:  # pragma: no cover - defensive logging safety
         logger.debug("Unable to resolve voice mapping for diagnostics: %s", exc)
 
+    voice_resolved = resolved_voice or default_voice
+
     return {
         "provider": "chatterbox",
-        "mapping_key": resolved_voice or voice_name or default_voice,
-        "voice_name": voice_name,
-        "resolved_voice": resolved_voice,
+        "mapping_key": voice_resolved or voice_name,
+        "voice_requested": voice_name,
+        "voice_resolved": voice_resolved,
+        "fallback_used": fallback_used,
         "voice_source": voice_source,
         "language": language,
+        "response_format": response_format,
         "resolved_language": resolved_language,
     }
 
@@ -290,12 +312,23 @@ def _log_tts_http_error_from_context(
     request_path: Optional[str] = None,
 ) -> None:
     request_path = request_path or ""
-    conversation_id = _extract_first(payload, _CONVERSATION_ID_FIELDS)
+    conversation_id, conversation_source, conversation_empty = _extract_with_source(
+        payload, _CONVERSATION_ID_FIELDS
+    )
     session_id = _extract_first(payload, _SESSION_ID_FIELDS)
     segment_id = _extract_first(payload, _SEGMENT_ID_FIELDS)
     if not conversation_id and request_context:
         headers = request_context.get("headers") or {}
-        conversation_id = _normalize_optional(headers.get("x-conversation-id"))
+        if "x-conversation-id" in headers:
+            header_value = headers.get("x-conversation-id")
+            conversation_id = _normalize_optional(header_value)
+            conversation_source = "header.x-conversation-id"
+            conversation_empty = not bool(conversation_id)
+        else:
+            conversation_source = conversation_source or "missing"
+            conversation_empty = conversation_empty or True
+    else:
+        conversation_source = conversation_source or "missing"
 
     mapping_info = _build_mapping_info(payload)
     redacted_payload = _redact_payload(payload, request_path)
@@ -312,26 +345,35 @@ def _log_tts_http_error_from_context(
     request_url = (request_context or {}).get("url") or request_path or "internal://tts"
 
     log_payload = {
+        "status_code": status_code,
+        "provider": mapping_info["provider"],
+        "conversation_id": {
+            "source": conversation_source,
+            "value": conversation_id,
+            "empty": conversation_empty,
+        },
+        "voice_requested": mapping_info["voice_requested"],
+        "voice_resolved": mapping_info["voice_resolved"],
+        "fallback_used": mapping_info["fallback_used"],
+        "language": mapping_info["language"],
+        "response_format": mapping_info["response_format"],
+        "response_body_truncated": response_body_logged if formatted_body is not None else None,
+        "request_json_redacted": redacted_payload,
         "correlation": {
-            "conversation_id": conversation_id,
             "session_id": session_id,
             "segment_id": segment_id,
         },
-        "mapping": mapping_info,
         "request": {
             "method": request_method,
             "url": request_url,
             "timeout_seconds": None,
             "headers": filtered_request_headers,
-            "json": redacted_payload,
         },
         "response": {
-            "status_code": status_code,
             "headers": filtered_response_headers,
             "body_is_json": is_json,
             "body_empty": body_empty,
             "body_truncated": truncated,
-            "body": response_body_logged if formatted_body is not None else None,
         },
     }
 
