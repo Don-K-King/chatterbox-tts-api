@@ -271,6 +271,37 @@ def _extract_response_content_type(headers: Dict[str, str]) -> Optional[str]:
     return _normalize_optional(normalized.get("content-type"))
 
 
+def _format_log_line_value(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _build_error_log_message(
+    *,
+    status_code: int,
+    response_body_truncated: Optional[str],
+    response_content_type: Optional[str],
+    conversation_id: Optional[str],
+    mapping_info: Dict[str, Any],
+    log_payload: Dict[str, Any],
+) -> str:
+    tts_http_error = json.dumps(log_payload, ensure_ascii=False, default=str)
+    return (
+        "TTS HTTP error response "
+        f"status_code={status_code} "
+        f"response_body_truncated={_format_log_line_value(response_body_truncated)} "
+        f"content_type={_format_log_line_value(response_content_type)} "
+        f"conversation_id={_format_log_line_value(conversation_id)} "
+        f"voice={_format_log_line_value(mapping_info.get('voice_requested'))} "
+        f"language={_format_log_line_value(mapping_info.get('language'))} "
+        f"mapping_key={_format_log_line_value(mapping_info.get('mapping_key'))} "
+        f"tts_http_error={tts_http_error}"
+    )
+
+
 def _build_voice_library_snapshot(voice_requested: Optional[str]) -> Dict[str, Any]:
     try:
         voice_library = get_voice_library()
@@ -439,6 +470,27 @@ def _log_tts_http_error_from_context(
         )
 
     if status_code >= 500:
-        logger.error("TTS HTTP error response", extra={"tts_http_error": log_payload}, exc_info=exception)
+        logger.error(
+            _build_error_log_message(
+                status_code=status_code,
+                response_body_truncated=response_body_logged if formatted_body is not None else None,
+                response_content_type=response_content_type,
+                conversation_id=conversation_id,
+                mapping_info=mapping_info,
+                log_payload=log_payload,
+            ),
+            extra={"tts_http_error": log_payload},
+            exc_info=exception,
+        )
     else:
-        logger.warning("TTS HTTP error response", extra={"tts_http_error": log_payload})
+        logger.warning(
+            _build_error_log_message(
+                status_code=status_code,
+                response_body_truncated=response_body_logged if formatted_body is not None else None,
+                response_content_type=response_content_type,
+                conversation_id=conversation_id,
+                mapping_info=mapping_info,
+                log_payload=log_payload,
+            ),
+            extra={"tts_http_error": log_payload},
+        )

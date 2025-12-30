@@ -979,6 +979,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 4123 --log-level debug
 python main.py
 ```
 
+**TTS HTTP error logging**
+
+Non-2xx TTS responses emit a warning/error log line that includes redacted request metadata,
+`response_body_truncated` (max 16KB), and a `tts_http_error=<json>` payload so Docker logs
+capture the full diagnostics.
+
 </details>
 
 <details>
