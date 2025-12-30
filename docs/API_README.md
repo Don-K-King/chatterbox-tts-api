@@ -325,6 +325,9 @@ VOICE_SAMPLE_PATH=./voice-sample.mp3
 VOICE_LIBRARY_DIR=./voices
 DEVICE=auto               # auto/cuda/mps/cpu
 MODEL_CACHE_DIR=./models
+
+# Diagnostics
+TTS_DEBUG_HTTP=false      # Log detailed TTS HTTP errors
 ```
 
 ### Parameter Effects
