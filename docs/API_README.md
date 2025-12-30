@@ -327,7 +327,7 @@ DEVICE=auto               # auto/cuda/mps/cpu
 MODEL_CACHE_DIR=./models
 
 # Diagnostics
-TTS_DEBUG_HTTP=false      # Log detailed TTS HTTP errors
+TTS_DEBUG_HTTP=false      # Log detailed downstream TTS error diagnostics (snapshots only on downstream errors)
 ```
 
 ### Parameter Effects

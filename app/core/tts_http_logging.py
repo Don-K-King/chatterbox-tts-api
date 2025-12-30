@@ -231,21 +231,85 @@ async def log_tts_http_error(
         return
 
     payload = await _parse_request_payload(request)
+    request_context = build_tts_request_context(request)
+    _log_tts_http_error_from_context(
+        request_context=request_context,
+        payload=payload,
+        status_code=status_code,
+        response_body=response_body,
+        response_headers=response_headers,
+        exception=exception,
+    )
+
+
+def build_tts_request_context(request: Request) -> Dict[str, Any]:
+    return {
+        "method": request.method,
+        "url": str(request.url),
+        "path": request.url.path,
+        "headers": dict(request.headers),
+    }
+
+
+def log_tts_provider_error(
+    *,
+    payload: Dict[str, Any],
+    status_code: int,
+    response_body: Any,
+    response_headers: Optional[Dict[str, str]] = None,
+    exception: Optional[BaseException] = None,
+    request_context: Optional[Dict[str, Any]] = None,
+    request_path: Optional[str] = None,
+) -> None:
+    resolved_path = request_path
+    if request_context:
+        resolved_path = request_context.get("path") or resolved_path
+
+    if resolved_path and not _is_speech_endpoint(resolved_path):
+        return
+
+    _log_tts_http_error_from_context(
+        request_context=request_context,
+        payload=payload,
+        status_code=status_code,
+        response_body=response_body,
+        response_headers=response_headers or {},
+        exception=exception,
+        request_path=resolved_path,
+    )
+
+
+def _log_tts_http_error_from_context(
+    *,
+    request_context: Optional[Dict[str, Any]],
+    payload: Dict[str, Any],
+    status_code: int,
+    response_body: Any,
+    response_headers: Dict[str, str],
+    exception: Optional[BaseException] = None,
+    request_path: Optional[str] = None,
+) -> None:
+    request_path = request_path or ""
     conversation_id = _extract_first(payload, _CONVERSATION_ID_FIELDS)
     session_id = _extract_first(payload, _SESSION_ID_FIELDS)
     segment_id = _extract_first(payload, _SEGMENT_ID_FIELDS)
-    if not conversation_id:
-        conversation_id = _normalize_optional(request.headers.get("x-conversation-id"))
+    if not conversation_id and request_context:
+        headers = request_context.get("headers") or {}
+        conversation_id = _normalize_optional(headers.get("x-conversation-id"))
 
     mapping_info = _build_mapping_info(payload)
-    redacted_payload = _redact_payload(payload, request.url.path)
-    filtered_request_headers = _filter_headers(dict(request.headers), _REQUEST_HEADER_ALLOWLIST)
+    redacted_payload = _redact_payload(payload, request_path)
+    request_headers = (request_context or {}).get("headers") or {}
+    filtered_request_headers = _filter_headers(dict(request_headers), _REQUEST_HEADER_ALLOWLIST)
     filtered_response_headers = _filter_headers(response_headers, _RESPONSE_HEADER_ALLOWLIST)
 
     formatted_body, is_json, body_empty = _format_response_body(response_body)
     response_body_logged, truncated = (
         _truncate_body(formatted_body) if formatted_body is not None else ("", False)
     )
+
+    request_method = (request_context or {}).get("method") or "INTERNAL"
+    request_url = (request_context or {}).get("url") or request_path or "internal://tts"
 
     log_payload = {
         "correlation": {
@@ -255,8 +319,8 @@ async def log_tts_http_error(
         },
         "mapping": mapping_info,
         "request": {
-            "method": request.method,
-            "url": str(request.url),
+            "method": request_method,
+            "url": request_url,
             "timeout_seconds": None,
             "headers": filtered_request_headers,
             "json": redacted_payload,
