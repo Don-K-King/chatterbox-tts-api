@@ -189,10 +189,12 @@ class LongTextProcessor:
                         text=chunk.text,
                         voice_sample_path=voice_path,
                         conversation_id=str(job_id),
+                        voice_name=metadata.voice,
                         language_id=language_id,
                         exaggeration=metadata.parameters.get('exaggeration'),
                         cfg_weight=metadata.parameters.get('cfg_weight'),
-                        temperature=metadata.parameters.get('temperature')
+                        temperature=metadata.parameters.get('temperature'),
+                        response_format=metadata.output_format,
                     )
 
                     # Save chunk audio file

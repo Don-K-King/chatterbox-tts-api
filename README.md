@@ -619,7 +619,7 @@ Key environment variables (see the example files for full list):
 | `TEMPERATURE`            | `0.8`                | Sampling randomness (0.05-5.0) |
 | `VOICE_SAMPLE_PATH`      | `./voice-sample.mp3` | Voice sample for cloning       |
 | `DEVICE`                 | `auto`               | Device (auto/cuda/mps/cpu)     |
-| `TTS_DEBUG_HTTP`         | `false`              | Log detailed TTS HTTP errors   |
+| `TTS_DEBUG_HTTP`         | `false`              | Log detailed downstream TTS error diagnostics (snapshots only on downstream errors) |
 
 <details>
 <summary><strong>🎭 Voice Cloning</strong></summary>

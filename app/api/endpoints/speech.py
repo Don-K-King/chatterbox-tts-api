@@ -44,6 +44,7 @@ from app.core.tts_cache import (
     get_cached_audio,
     store_audio,
 )
+from app.core.tts_http_logging import build_tts_request_context, log_tts_provider_error
 
 # Create router with aliasing support
 base_router = APIRouter()
@@ -331,14 +332,52 @@ def resolve_conversation_id_from_form(
     return _resolve_conversation_id(body_value, conversation_id_header, Config.ALLOW_MISSING_CONVERSATION_ID)
 
 
+def _build_tts_diagnostics_payload(
+    *,
+    text: str,
+    conversation_id: Optional[str],
+    voice: Optional[str],
+    language: Optional[str],
+    response_format: Optional[str],
+    stream_format: Optional[str],
+    speed: Optional[float],
+    exaggeration: Optional[float],
+    cfg_weight: Optional[float],
+    temperature: Optional[float],
+    streaming_chunk_size: Optional[int],
+    streaming_strategy: Optional[str],
+    streaming_quality: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "input": text,
+        "conversation_id": conversation_id,
+        "voice": voice,
+        "language": language,
+        "response_format": response_format,
+        "stream_format": stream_format,
+        "speed": speed,
+        "exaggeration": exaggeration,
+        "cfg_weight": cfg_weight,
+        "temperature": temperature,
+        "streaming_chunk_size": streaming_chunk_size,
+        "streaming_strategy": streaming_strategy,
+        "streaming_quality": streaming_quality,
+    }
+
+
 async def generate_speech_internal(
     text: str,
     voice_sample_path: str,
     conversation_id: str,
+    voice_name: Optional[str] = None,
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
-    temperature: Optional[float] = None
+    temperature: Optional[float] = None,
+    response_format: Optional[str] = None,
+    stream_format: Optional[str] = None,
+    speed: Optional[float] = None,
+    request_context: Optional[Dict[str, Any]] = None,
 ) -> io.BytesIO:
     """Internal function to generate speech with given parameters"""
     global REQUEST_COUNTER
@@ -512,14 +551,37 @@ async def generate_speech_internal(
             # Update status with error
             update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS generation failed: {str(e)}")
             print(f"✗ TTS generation failed: {e}")
+            error_detail = {
+                "error": {
+                    "message": f"TTS generation failed: {str(e)}",
+                    "type": "generation_error",
+                }
+            }
+            log_tts_provider_error(
+                payload=_build_tts_diagnostics_payload(
+                    text=text,
+                    conversation_id=conversation_id,
+                    voice=voice_name,
+                    language=language_id,
+                    response_format=response_format,
+                    stream_format=stream_format,
+                    speed=speed,
+                    exaggeration=exaggeration,
+                    cfg_weight=cfg_weight,
+                    temperature=temperature,
+                    streaming_chunk_size=None,
+                    streaming_strategy=None,
+                    streaming_quality=None,
+                ),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                response_body=error_detail,
+                response_headers={},
+                exception=e,
+                request_context=request_context,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "error": {
-                        "message": f"TTS generation failed: {str(e)}",
-                        "type": "generation_error"
-                    }
-                }
+                detail=error_detail,
             )
 
         finally:
@@ -569,13 +631,18 @@ async def generate_speech_streaming(
     text: str,
     voice_sample_path: str,
     conversation_id: str,
+    voice_name: Optional[str] = None,
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
     streaming_chunk_size: Optional[int] = None,
     streaming_strategy: Optional[str] = None,
-    streaming_quality: Optional[str] = None
+    streaming_quality: Optional[str] = None,
+    response_format: Optional[str] = None,
+    stream_format: Optional[str] = None,
+    speed: Optional[float] = None,
+    request_context: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[bytes, None]:
     """Streaming function to generate speech with real-time chunk yielding"""
     global REQUEST_COUNTER
@@ -746,14 +813,37 @@ async def generate_speech_streaming(
         # Update status with error
         update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS streaming failed: {str(e)}")
         print(f"✗ TTS streaming failed: {e}")
+        error_detail = {
+            "error": {
+                "message": f"TTS streaming failed: {str(e)}",
+                "type": "generation_error",
+            }
+        }
+        log_tts_provider_error(
+            payload=_build_tts_diagnostics_payload(
+                text=text,
+                conversation_id=conversation_id,
+                voice=voice_name,
+                language=language_id,
+                response_format=response_format,
+                stream_format=stream_format,
+                speed=speed,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                temperature=temperature,
+                streaming_chunk_size=streaming_chunk_size,
+                streaming_strategy=streaming_strategy,
+                streaming_quality=streaming_quality,
+            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            response_body=error_detail,
+            response_headers={},
+            exception=e,
+            request_context=request_context,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": {
-                    "message": f"TTS streaming failed: {str(e)}",
-                    "type": "generation_error"
-                }
-            }
+            detail=error_detail,
         )
 
     finally:
@@ -775,13 +865,18 @@ async def generate_speech_sse(
     text: str,
     voice_sample_path: str,
     conversation_id: str,
+    voice_name: Optional[str] = None,
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
     streaming_chunk_size: Optional[int] = None,
     streaming_strategy: Optional[str] = None,
-    streaming_quality: Optional[str] = None
+    streaming_quality: Optional[str] = None,
+    response_format: Optional[str] = None,
+    stream_format: Optional[str] = None,
+    speed: Optional[float] = None,
+    request_context: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
     """Generate Server-Side Events for speech streaming (OpenAI compatible format)"""
     global REQUEST_COUNTER
@@ -979,14 +1074,37 @@ async def generate_speech_sse(
         # Update status with error
         update_tts_status(request_id, TTSStatus.ERROR, error_message=f"TTS SSE streaming failed: {str(e)}")
         print(f"✗ TTS SSE streaming failed: {e}")
+        error_detail = {
+            "error": {
+                "message": f"TTS SSE streaming failed: {str(e)}",
+                "type": "generation_error",
+            }
+        }
+        log_tts_provider_error(
+            payload=_build_tts_diagnostics_payload(
+                text=text,
+                conversation_id=conversation_id,
+                voice=voice_name,
+                language=language_id,
+                response_format=response_format,
+                stream_format=stream_format,
+                speed=speed,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                temperature=temperature,
+                streaming_chunk_size=streaming_chunk_size,
+                streaming_strategy=streaming_strategy,
+                streaming_quality=streaming_quality,
+            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            response_body=error_detail,
+            response_headers={},
+            exception=e,
+            request_context=request_context,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": {
-                    "message": f"TTS SSE streaming failed: {str(e)}",
-                    "type": "generation_error"
-                }
-            }
+            detail=error_detail,
         )
 
     finally:
@@ -1016,14 +1134,14 @@ async def generate_speech_sse(
     summary="Generate speech from text",
     description="Generate speech audio from input text. Supports voice names from the voice library or defaults to configured voice sample. Use stream_format='sse' for Server-Side Events streaming."
 )
-async def text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
+async def text_to_speech(request: Request, tts_request: TTSRequest = Depends(parse_tts_request)):
     """Generate speech from text using Chatterbox TTS with voice selection support"""
 
     # Resolve voice name to file path and language
-    voice_sample_path, language_id = resolve_voice_path_and_language(request.voice)
+    voice_sample_path, language_id = resolve_voice_path_and_language(tts_request.voice)
 
-    if request.language:
-        override_language = request.language
+    if tts_request.language:
+        override_language = tts_request.language
         if is_multilingual():
             if supports_language(override_language):
                 language_id = override_language
@@ -1043,20 +1161,27 @@ async def text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
                 )
 
     # Check if SSE streaming is requested
-    if request.stream_format == "sse":
+    request_context = build_tts_request_context(request)
+
+    if tts_request.stream_format == "sse":
         # Return SSE streaming response
         return StreamingResponse(
             generate_speech_sse(
-                text=request.input,
+                text=tts_request.input,
                 voice_sample_path=voice_sample_path,
-                conversation_id=request.conversation_id,
+                conversation_id=tts_request.conversation_id,
+                voice_name=tts_request.voice,
                 language_id=language_id,
-                exaggeration=request.exaggeration,
-                cfg_weight=request.cfg_weight,
-                temperature=request.temperature,
-                streaming_chunk_size=request.streaming_chunk_size,
-                streaming_strategy=request.streaming_strategy,
-                streaming_quality=request.streaming_quality
+                exaggeration=tts_request.exaggeration,
+                cfg_weight=tts_request.cfg_weight,
+                temperature=tts_request.temperature,
+                streaming_chunk_size=tts_request.streaming_chunk_size,
+                streaming_strategy=tts_request.streaming_strategy,
+                streaming_quality=tts_request.streaming_quality,
+                response_format=tts_request.response_format,
+                stream_format=tts_request.stream_format,
+                speed=tts_request.speed,
+                request_context=request_context,
             ),
             media_type="text/event-stream",
             headers={
@@ -1068,13 +1193,18 @@ async def text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
     else:
         # Standard audio generation
         buffer = await generate_speech_internal(
-            text=request.input,
+            text=tts_request.input,
             voice_sample_path=voice_sample_path,
-            conversation_id=request.conversation_id,
+            conversation_id=tts_request.conversation_id,
+            voice_name=tts_request.voice,
             language_id=language_id,
-            exaggeration=request.exaggeration,
-            cfg_weight=request.cfg_weight,
-            temperature=request.temperature
+            exaggeration=tts_request.exaggeration,
+            cfg_weight=tts_request.cfg_weight,
+            temperature=tts_request.temperature,
+            response_format=tts_request.response_format,
+            stream_format=tts_request.stream_format,
+            speed=tts_request.speed,
+            request_context=request_context,
         )
         
         # Create response
@@ -1099,6 +1229,7 @@ async def text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
     description="Generate speech audio from input text with voice library selection or optional custom voice file upload. Use stream_format='sse' for Server-Side Events streaming."
 )
 async def text_to_speech_with_upload(
+    request: Request,
     input: str = Form(..., description="The text to generate audio for", min_length=1, max_length=3000),
     voice: Optional[str] = Form("alloy", description="Voice name from library or OpenAI voice name (defaults to configured sample)"),
     response_format: Optional[str] = Form("wav", description="Audio format (always returns WAV)"),
@@ -1251,6 +1382,8 @@ async def text_to_speech_with_upload(
                     override_language,
                 )
 
+    request_context = build_tts_request_context(request)
+
     try:
         # Check if SSE streaming is requested
         if stream_format == "sse":
@@ -1261,13 +1394,18 @@ async def text_to_speech_with_upload(
                         text=input,
                         voice_sample_path=voice_sample_path,
                         conversation_id=conversation_id,
+                        voice_name=voice,
                         language_id=language_id,
                         exaggeration=exaggeration,
                         cfg_weight=cfg_weight,
                         temperature=temperature,
                         streaming_chunk_size=streaming_chunk_size,
                         streaming_strategy=streaming_strategy,
-                        streaming_quality=streaming_quality
+                        streaming_quality=streaming_quality,
+                        response_format=response_format,
+                        stream_format=stream_format,
+                        speed=speed,
+                        request_context=request_context,
                     ):
                         yield sse_event
                 finally:
@@ -1296,10 +1434,15 @@ async def text_to_speech_with_upload(
                 text=input,
                 voice_sample_path=voice_sample_path,
                 conversation_id=conversation_id,
+                voice_name=voice,
                 language_id=language_id,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
-                temperature=temperature
+                temperature=temperature,
+                response_format=response_format,
+                stream_format=stream_format,
+                speed=speed,
+                request_context=request_context,
             )
             
             # Create response
@@ -1334,14 +1477,14 @@ async def text_to_speech_with_upload(
     summary="Stream speech generation from text",
     description="Generate and stream speech audio in real-time. Supports voice names from the voice library or defaults to configured voice sample."
 )
-async def stream_text_to_speech(request: TTSRequest = Depends(parse_tts_request)):
+async def stream_text_to_speech(request: Request, tts_request: TTSRequest = Depends(parse_tts_request)):
     """Stream speech generation from text using Chatterbox TTS with voice selection support"""
     
     # Resolve voice name to file path and language
-    voice_sample_path, language_id = resolve_voice_path_and_language(request.voice)
+    voice_sample_path, language_id = resolve_voice_path_and_language(tts_request.voice)
 
-    if request.language:
-        override_language = request.language
+    if tts_request.language:
+        override_language = tts_request.language
         if is_multilingual():
             if supports_language(override_language):
                 language_id = override_language
@@ -1361,18 +1504,25 @@ async def stream_text_to_speech(request: TTSRequest = Depends(parse_tts_request)
                 )
 
     # Create streaming response
+    request_context = build_tts_request_context(request)
+
     return StreamingResponse(
         generate_speech_streaming(
-            text=request.input,
+            text=tts_request.input,
             voice_sample_path=voice_sample_path,
-            conversation_id=request.conversation_id,
+            conversation_id=tts_request.conversation_id,
+            voice_name=tts_request.voice,
             language_id=language_id,
-            exaggeration=request.exaggeration,
-            cfg_weight=request.cfg_weight,
-            temperature=request.temperature,
-            streaming_chunk_size=request.streaming_chunk_size,
-            streaming_strategy=request.streaming_strategy,
-            streaming_quality=request.streaming_quality
+            exaggeration=tts_request.exaggeration,
+            cfg_weight=tts_request.cfg_weight,
+            temperature=tts_request.temperature,
+            streaming_chunk_size=tts_request.streaming_chunk_size,
+            streaming_strategy=tts_request.streaming_strategy,
+            streaming_quality=tts_request.streaming_quality,
+            response_format=tts_request.response_format,
+            stream_format=tts_request.stream_format,
+            speed=tts_request.speed,
+            request_context=request_context,
         ),
         media_type="audio/wav",
         headers={
@@ -1396,6 +1546,7 @@ async def stream_text_to_speech(request: TTSRequest = Depends(parse_tts_request)
     description="Generate and stream speech audio in real-time with optional custom voice file upload"
 )
 async def stream_text_to_speech_with_upload(
+    request: Request,
     input: str = Form(..., description="The text to generate audio for", min_length=1, max_length=3000),
     voice: Optional[str] = Form("alloy", description="Voice name from library or OpenAI voice name (defaults to configured sample)"),
     response_format: Optional[str] = Form("wav", description="Audio format (always returns WAV)"),
@@ -1538,6 +1689,8 @@ async def stream_text_to_speech_with_upload(
                     override_language,
                 )
 
+    request_context = build_tts_request_context(request)
+
     # Create async generator that handles cleanup
     async def streaming_with_cleanup():
         try:
@@ -1545,13 +1698,18 @@ async def stream_text_to_speech_with_upload(
                 text=input,
                 voice_sample_path=voice_sample_path,
                 conversation_id=conversation_id,
+                voice_name=voice,
                 language_id=language_id,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
                 temperature=temperature,
                 streaming_chunk_size=streaming_chunk_size,
                 streaming_strategy=streaming_strategy,
-                streaming_quality=streaming_quality
+                streaming_quality=streaming_quality,
+                response_format=response_format,
+                stream_format="audio",
+                speed=speed,
+                request_context=request_context,
             ):
                 yield chunk
         finally:

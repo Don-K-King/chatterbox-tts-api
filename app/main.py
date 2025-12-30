@@ -15,7 +15,6 @@ from app.core.background_tasks import start_background_processor, stop_backgroun
 from app.api.router import api_router
 from app.config import Config
 from app.core.version import get_version
-from app.core.tts_http_logging import log_tts_http_error
 
 
 ascii_art = r"""
@@ -124,7 +123,6 @@ async def http_exception_handler(request, exc):
         status_code=exc.status_code,
         content=exc.detail
     )
-    await log_tts_http_error(request, exc.status_code, exc.detail, dict(response.headers), exc)
     return response
 
 
@@ -132,13 +130,6 @@ async def http_exception_handler(request, exc):
 async def validation_exception_handler(request, exc):
     detail = {"error": {"message": exc.errors(), "type": "validation_error"}}
     response = JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content=detail)
-    await log_tts_http_error(
-        request,
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail,
-        dict(response.headers),
-        exc,
-    )
     return response
 
 
@@ -153,12 +144,5 @@ async def general_exception_handler(request, exc):
     response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=content
-    )
-    await log_tts_http_error(
-        request,
-        status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content,
-        dict(response.headers),
-        exc,
     )
     return response
