@@ -4,6 +4,7 @@ Main FastAPI application
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -14,6 +15,7 @@ from app.core.background_tasks import start_background_processor, stop_backgroun
 from app.api.router import api_router
 from app.config import Config
 from app.core.version import get_version
+from app.core.tts_http_logging import log_tts_http_error
 
 
 ascii_art = r"""
@@ -118,20 +120,52 @@ app.include_router(api_router)
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
-    return JSONResponse(
+    if exc.status_code < 200 or exc.status_code >= 300:
+        await log_tts_http_error(
+            request=request,
+            status_code=exc.status_code,
+            response_body=exc.detail,
+            response_headers={},
+            exception=exc,
+        )
+    response = JSONResponse(
         status_code=exc.status_code,
         content=exc.detail
     )
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    detail = {"error": {"message": exc.errors(), "type": "validation_error"}}
+    await log_tts_http_error(
+        request=request,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        response_body=detail,
+        response_headers={},
+        exception=exc,
+    )
+    response = JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content=detail)
+    return response
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": {
-                "message": f"Internal server error: {str(exc)}",
-                "type": "internal_error"
-            }
+    content = {
+        "error": {
+            "message": f"Internal server error: {str(exc)}",
+            "type": "internal_error"
         }
-    ) 
+    }
+    await log_tts_http_error(
+        request=request,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        response_body=content,
+        response_headers={},
+        exception=exc,
+    )
+    response = JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=content
+    )
+    return response

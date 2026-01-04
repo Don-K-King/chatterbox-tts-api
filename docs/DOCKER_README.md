@@ -153,6 +153,7 @@ nano .env  # or your preferred editor
 | `VOICE_LIBRARY_DIR` | `/voices`            | Directory for voice library     |
 | `DEVICE`            | `auto`               | Device: auto/cuda/mps/cpu       |
 | `MAX_CHUNK_LENGTH`  | `280`                | Max characters per chunk        |
+| `TTS_DEBUG_HTTP`    | `false`              | Log detailed downstream TTS error diagnostics (redacted request/response, optional voice snapshot on errors) |
 
 ### Voice Configuration
 

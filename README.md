@@ -145,6 +145,10 @@ docker compose -f docker/docker-compose.blackwell.yml --profile frontend up -d  
 # Watch the logs as it initializes (the first use of TTS takes the longest)
 docker logs chatterbox-tts-api -f
 
+# Non-2xx responses from /v1/audio/speech emit a structured "TTS HTTP error response"
+# log block with diagnostics (status code, conversation_id source/value, voice resolution,
+# redacted request metadata, and a truncated response body).
+
 # Test the API
 curl -X POST http://localhost:4123/v1/audio/speech \
   -H "Content-Type: application/json" \
@@ -619,6 +623,7 @@ Key environment variables (see the example files for full list):
 | `TEMPERATURE`            | `0.8`                | Sampling randomness (0.05-5.0) |
 | `VOICE_SAMPLE_PATH`      | `./voice-sample.mp3` | Voice sample for cloning       |
 | `DEVICE`                 | `auto`               | Device (auto/cuda/mps/cpu)     |
+| `TTS_DEBUG_HTTP`         | `false`              | Log detailed downstream TTS error diagnostics (redacted request/response, optional voice snapshot on errors) |
 
 <details>
 <summary><strong>🎭 Voice Cloning</strong></summary>
@@ -973,6 +978,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 4123 --log-level debug
 # Alternative startup method
 python main.py
 ```
+
+**TTS HTTP error logging**
+
+Non-2xx TTS responses emit a warning/error log line that includes redacted request metadata,
+`response_body_truncated` (max 16KB), and a `tts_http_error=<json>` payload so Docker logs
+capture the full diagnostics.
 
 </details>
 
