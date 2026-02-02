@@ -530,6 +530,13 @@ async def generate_speech_internal(
             update_tts_status(request_id, TTSStatus.FINALIZING, "Converting to WAV format")
             buffer = io.BytesIO()
 
+            if torch.is_tensor(final_audio):
+                has_invalid_samples = not torch.isfinite(final_audio).all()
+                if has_invalid_samples:
+                    logger.warning("Non-finite values detected in final audio; sanitizing before WAV export.")
+                final_audio = torch.nan_to_num(final_audio, nan=0.0, posinf=1.0, neginf=-1.0)
+                final_audio = torch.clamp(final_audio, -1.0, 1.0)
+
             # Ensure final_audio is on CPU for saving
             if hasattr(final_audio, 'cpu'):
                 final_audio_cpu = final_audio.cpu()
