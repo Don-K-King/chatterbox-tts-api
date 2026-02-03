@@ -748,7 +748,7 @@ The API includes advanced memory management to prevent memory leaks and optimize
 | Variable                    | Default | Description                       |
 | --------------------------- | ------- | --------------------------------- |
 | `MEMORY_CLEANUP_INTERVAL`   | `5`     | Cleanup memory every N requests   |
-| `CUDA_CACHE_CLEAR_INTERVAL` | `3`     | Clear CUDA cache every N requests |
+| `CUDA_CACHE_CLEAR_INTERVAL` | `3`     | Clear CUDA cache every N chunks during generation (set `0`/`none` to disable) |
 | `ENABLE_MEMORY_MONITORING`  | `true`  | Enable detailed memory logging    |
 
 ### Memory Monitoring Endpoints
@@ -831,6 +831,14 @@ MAX_CHUNK_LENGTH=200             # Smaller chunks for less memory usage
 MEMORY_CLEANUP_INTERVAL=1
 CUDA_CACHE_CLEAR_INTERVAL=1
 ENABLE_MEMORY_MONITORING=true
+```
+
+**To Disable Per-Chunk CUDA Cache Clears:**
+
+```env
+CUDA_CACHE_CLEAR_INTERVAL=0
+# or
+CUDA_CACHE_CLEAR_INTERVAL=none
 ```
 
 **Memory Leak Prevention:**

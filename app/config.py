@@ -3,11 +3,21 @@ Configuration management for Chatterbox TTS API
 """
 
 import os
+from typing import Optional
 import torch
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+def _parse_optional_int(value: Optional[str], default: Optional[int]) -> Optional[int]:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"", "none", "null"}:
+        return None
+    return int(normalized)
 
 
 class Config:
@@ -53,7 +63,7 @@ class Config:
 
     # Memory management settings
     MEMORY_CLEANUP_INTERVAL = int(os.getenv('MEMORY_CLEANUP_INTERVAL', 5))
-    CUDA_CACHE_CLEAR_INTERVAL = int(os.getenv('CUDA_CACHE_CLEAR_INTERVAL', 3))
+    CUDA_CACHE_CLEAR_INTERVAL = _parse_optional_int(os.getenv('CUDA_CACHE_CLEAR_INTERVAL'), 3)
     ENABLE_MEMORY_MONITORING = os.getenv('ENABLE_MEMORY_MONITORING', 'true').lower() == 'true'
     
     # CORS settings
@@ -77,8 +87,10 @@ class Config:
             raise ValueError(f"MAX_TOTAL_LENGTH must be positive, got {cls.MAX_TOTAL_LENGTH}")
         if cls.MEMORY_CLEANUP_INTERVAL <= 0:
             raise ValueError(f"MEMORY_CLEANUP_INTERVAL must be positive, got {cls.MEMORY_CLEANUP_INTERVAL}")
-        if cls.CUDA_CACHE_CLEAR_INTERVAL <= 0:
-            raise ValueError(f"CUDA_CACHE_CLEAR_INTERVAL must be positive, got {cls.CUDA_CACHE_CLEAR_INTERVAL}")
+        if cls.CUDA_CACHE_CLEAR_INTERVAL is not None and cls.CUDA_CACHE_CLEAR_INTERVAL < 0:
+            raise ValueError(
+                f"CUDA_CACHE_CLEAR_INTERVAL must be zero or positive, got {cls.CUDA_CACHE_CLEAR_INTERVAL}"
+            )
         if cls.LONG_TEXT_MAX_LENGTH <= cls.MAX_TOTAL_LENGTH:
             raise ValueError(f"LONG_TEXT_MAX_LENGTH ({cls.LONG_TEXT_MAX_LENGTH}) must be greater than MAX_TOTAL_LENGTH ({cls.MAX_TOTAL_LENGTH})")
         if cls.LONG_TEXT_CHUNK_SIZE <= 0:
