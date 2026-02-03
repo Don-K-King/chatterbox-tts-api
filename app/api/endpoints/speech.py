@@ -57,6 +57,18 @@ REQUEST_COUNTER = 0
 SUPPORTED_AUDIO_FORMATS = {'.mp3', '.wav', '.flac', '.m4a', '.ogg'}
 
 
+def _maybe_clear_cuda_cache(chunk_index: int) -> None:
+    """Clear CUDA cache based on configured interval (0/None disables clearing)."""
+    interval = Config.CUDA_CACHE_CLEAR_INTERVAL
+    if interval is None or interval <= 0:
+        return
+    if chunk_index > 0 and chunk_index % interval == 0:
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
 async def ensure_wav_voice_sample(path: str) -> str:
     """Ensure the provided voice sample is available as a WAV file.
 
@@ -511,11 +523,7 @@ async def generate_speech_internal(
                     audio_chunks.append(audio_tensor)
 
                 # Periodic memory cleanup during generation
-                if i > 0 and i % 3 == 0:  # Every 3 chunks
-                    import gc
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+                _maybe_clear_cuda_cache(i)
 
             # Concatenate all chunks with memory management
             if len(audio_chunks) > 1:
@@ -807,11 +815,7 @@ async def generate_speech_streaming(
                     del pcm_data
 
                 # Periodic memory cleanup during generation
-                if i > 0 and i % 3 == 0:  # Every 3 chunks
-                    import gc
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+                _maybe_clear_cuda_cache(i)
 
             update_tts_status(request_id, TTSStatus.COMPLETED, "Streaming audio generation completed")
             print(f"✓ Streaming audio generation completed. Total samples: {total_samples:,}")
@@ -1052,11 +1056,7 @@ async def generate_speech_sse(
                     del pcm_data
 
                 # Periodic memory cleanup during generation
-                if i > 0 and i % 3 == 0:  # Every 3 chunks
-                    import gc
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+                _maybe_clear_cuda_cache(i)
 
             # Send completion event
             total_output_tokens = total_audio_chunks * 50  # Rough estimate

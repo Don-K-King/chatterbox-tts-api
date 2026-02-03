@@ -389,6 +389,16 @@ docker run -d -p 4123:4123 \
 - **Memory usage**: Varies by device (GPU recommended for best performance)
 - **Concurrent requests**: FastAPI async support allows better multi-request handling
 
+## Memory Management
+
+The service performs periodic cleanup during audio generation to keep GPU memory stable.
+
+**Configuration:**
+
+- `CUDA_CACHE_CLEAR_INTERVAL` controls how often CUDA cache is cleared while generating audio chunks.
+  - Default: `3` (every 3 chunks)
+  - Set to `0` or `none` to disable per-chunk cache clears.
+
 ## Integration Examples
 
 ### Python with requests
