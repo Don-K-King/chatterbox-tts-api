@@ -1,0 +1,122 @@
+version: "3.9"
+
+# ============================================================================
+# !!! CPU-TEST-MODUS AKTIV — NICHT FÜR PRODUKTION OHNE PRÜFUNG !!!
+# ----------------------------------------------------------------------------
+# Diese Datei läuft aktuell auf CPU (DEVICE=cpu, Image-Tag aus CPU-Build).
+# Damit kann ein Swarm ohne GPU-Hardware den Service starten und der gesamte
+# Workflow getestet werden. Chatterbox auf CPU ist deutlich langsamer als auf
+# GPU — für reale Last unbedingt auf GPU umstellen.
+#
+# Für GPU-Betrieb alle mit `# GPU-PROD:` markierten Zeilen wieder aktivieren.
+# Suchlauf: einfach nach "GPU-PROD" greppen.
+# ============================================================================
+
+# ============================================================================
+# Chatterbox TTS API — Stack-Definition für Docker Swarm
+# ============================================================================
+# Diese Datei wird NICHT pro Kunde angepasst. Alle umgebungsspezifischen
+# Werte werden aus Environment-Variablen gelesen — Vorlage siehe
+# `kaposg.env.example`.
+#
+# Deployment via Portainer:
+#   Stacks → Add stack → Name "evido-chatterbox"
+#   → Diese Datei hochladen
+#   → Im Block "Environment variables": "Load variables from .env file"
+#     wählen und kaposg.env hochladen
+#   → Deploy the stack
+# ============================================================================
+
+services:
+  chatterbox-tts:
+    image: dreg.lexo.ch/evido-kaposg-chatterbox:${CHATTERBOX_IMAGE_TAG:-latest}
+    environment:
+      # --- Umgebungsspezifisch (aus kaposg.env) ---
+      AUTH_TOKEN: "${CHATTERBOX_AUTH_TOKEN:-}"
+      OFFLINE_MODE: "${CHATTERBOX_OFFLINE_MODE:-false}"
+      # GPU-PROD: Für GPU-Betrieb folgende Zeile aktivieren:
+      # NVIDIA_VISIBLE_DEVICES: "${CHATTERBOX_GPU_UUID:?CHATTERBOX_GPU_UUID muss in kaposg.env gesetzt sein}"
+
+      # --- API-Konfiguration (fix) ---
+      PORT: "4123"
+      HOST: "0.0.0.0"
+
+      # --- TTS-Modell-Konfiguration (fix) ---
+      # GPU-PROD: DEVICE: "auto"
+      DEVICE: "cpu"
+      EXAGGERATION: "0.5"
+      CFG_WEIGHT: "0.5"
+      TEMPERATURE: "0.8"
+
+      # --- Text-Verarbeitung (fix) ---
+      MAX_CHUNK_LENGTH: "280"
+      MAX_TOTAL_LENGTH: "3000"
+
+      # --- Long-Text-Job-Verarbeitung (fix) ---
+      LONG_TEXT_DATA_DIR: "/data/long_text_jobs"
+      LONG_TEXT_MAX_LENGTH: "100000"
+      LONG_TEXT_CHUNK_SIZE: "2500"
+      LONG_TEXT_SILENCE_PADDING_MS: "200"
+      LONG_TEXT_JOB_RETENTION_DAYS: "7"
+      LONG_TEXT_MAX_CONCURRENT_JOBS: "3"
+
+      # --- Voice-/Modell-Pfade (fix, Volumes mounten dorthin) ---
+      VOICE_SAMPLE_PATH: "/app/voice-sample.mp3"
+      MODEL_CACHE_DIR: "/cache"
+      VOICE_LIBRARY_DIR: "/voices"
+
+      # --- Memory-Management (fix) ---
+      MEMORY_CLEANUP_INTERVAL: "5"
+      CUDA_CACHE_CLEAR_INTERVAL: "3"
+      ENABLE_MEMORY_MONITORING: "true"
+    networks:
+      evido-chatterbox:
+        aliases:
+          - chatterbox-tts
+    volumes:
+      - chatterbox-models:/cache
+      - chatterbox-voices:/voices
+      - chatterbox-longtext:/data/long_text_jobs
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 0
+      placement:
+        constraints:
+          # Pinning auf den dedizierten Chatterbox-Node (siehe kaposg.env.example
+          # Vorbereitung Punkt d). Label muss auf einem Node gesetzt sein.
+          - node.labels.chatterbox == ds01
+
+  # Optionales React-Frontend für lokales Testing/Voice-Management.
+  # Aktivierung über kaposg.env (CHATTERBOX_FRONTEND_ENABLED=true) — Standard
+  # ist DEAKTIVIERT. Frontend ist NICHT zwingend für den evido-Stack nötig.
+  # Wenn aktiv, lauscht es auf Host-Port 4321.
+  chatterbox-frontend:
+    image: dreg.lexo.ch/evido-kaposg-chatterbox-frontend:${CHATTERBOX_FRONTEND_IMAGE_TAG:-latest}
+    networks:
+      - evido-chatterbox
+    ports:
+      - target: 80
+        published: 4321
+        protocol: tcp
+        mode: host
+    deploy:
+      replicas: ${CHATTERBOX_FRONTEND_REPLICAS:-0}
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 0
+      placement:
+        constraints:
+          - node.labels.chatterbox == ds01
+
+networks:
+  evido-chatterbox:
+    external: true
+
+volumes:
+  chatterbox-models:
+  chatterbox-voices:
+  chatterbox-longtext:
